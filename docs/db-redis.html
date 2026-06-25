@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redis データ設計</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>Redis データ設計</h1>
+<h2>接続情報</h2>
+<pre><code>Host: 127.0.0.1
+Port: 6379
+DB 0: 認可サーバー用（認可コード、リフレッシュトークン、セッション）
+DB 1: Rate Limit 用
+</code></pre>
+<hr />
+<h2>キー設計</h2>
+<h3>命名規則</h3>
+<pre><code>{サービス}:{データ種別}:{識別子}
+</code></pre>
+<p>例: <code>auth:code:abc123</code>, <code>auth:refresh:xyz789</code></p>
+<h3>キー一覧</h3>
+<table>
+<thead>
+<tr>
+<th>キー</th>
+<th>TTL</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auth:code:{code}</code></td>
+<td>600秒</td>
+<td>認可コード</td>
+</tr>
+<tr>
+<td><code>auth:refresh:{hash}</code></td>
+<td>604800秒</td>
+<td>リフレッシュトークン</td>
+</tr>
+<tr>
+<td><code>auth:session:{id}</code></td>
+<td>86400秒</td>
+<td>メンバーセッション</td>
+</tr>
+<tr>
+<td><code>auth:member_refreshes:{member_id}</code></td>
+<td>なし</td>
+<td>メンバー別リフレッシュトークン管理</td>
+</tr>
+<tr>
+<td><code>ratelimit:*</code></td>
+<td>60〜300秒</td>
+<td>Rate Limit</td>
+</tr>
+</tbody>
+</table>
+<p>※ アクセストークンは JWT（自己完結型）のため Redis に保存しない。
+失効制御はリフレッシュトークンの削除で行い、JWT は最大15分で自然失効する。</p>
+<hr />
+<h2>認可コード</h2>
+<p>認可エンドポイントで発行し、トークンエンドポイントで消費（1回限り）。</p>
+<p><strong>キー:</strong> <code>auth:code:{認可コード}</code></p>
+<p><strong>TTL:</strong> 600 秒（10分）</p>
+<p><strong>値（JSON）:</strong></p>
+<pre><code class="language-json">{
+  &quot;client_id&quot;: &quot;my-app&quot;,
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;redirect_uri&quot;: &quot;https://my-app.example/callback&quot;,
+  &quot;scope&quot;: &quot;read write&quot;,
+  &quot;code_challenge&quot;: &quot;E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&quot;,
+  &quot;code_challenge_method&quot;: &quot;S256&quot;,
+  &quot;issued_at&quot;: 1719196400
+}
+</code></pre>
+<p><strong>操作:</strong></p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>コマンド</th>
+<th>タイミング</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>保存</td>
+<td><code>SET auth:code:{code} {json} EX 600</code></td>
+<td>/authorize 成功時</td>
+</tr>
+<tr>
+<td>取得+削除</td>
+<td><code>GET</code> → <code>DEL</code> (トランザクション)</td>
+<td>/token リクエスト時</td>
+</tr>
+</tbody>
+</table>
+<p>※ 認可コードは1回使い切り。取得後すぐに削除し再利用を防ぐ。</p>
+<hr />
+<h2>リフレッシュトークン</h2>
+<p>アクセストークン（JWT）の再発行に使用する。失効制御の唯一の手段。</p>
+<p><strong>キー:</strong> <code>auth:refresh:{トークンのSHA-256ハッシュ}</code></p>
+<p><strong>TTL:</strong> 604800 秒（7日）</p>
+<p><strong>値（JSON）:</strong></p>
+<pre><code class="language-json">{
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;client_id&quot;: &quot;my-app&quot;,
+  &quot;scope&quot;: &quot;read write&quot;,
+  &quot;issued_at&quot;: 1719196400,
+  &quot;expires_at&quot;: 1719801200
+}
+</code></pre>
+<p><strong>操作:</strong></p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>コマンド</th>
+<th>タイミング</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>保存</td>
+<td><code>SET auth:refresh:{hash} {json} EX 604800</code></td>
+<td>/token 発行時</td>
+</tr>
+<tr>
+<td>取得</td>
+<td><code>GET auth:refresh:{hash}</code></td>
+<td>refresh_token grant 時</td>
+</tr>
+<tr>
+<td>削除</td>
+<td><code>DEL auth:refresh:{hash}</code></td>
+<td>/revoke 時、ローテーション時</td>
+</tr>
+</tbody>
+</table>
+<h3>リフレッシュトークンローテーション</h3>
+<pre><code>1. 旧リフレッシュトークンを GET で取得
+2. 旧リフレッシュトークンを DEL で削除
+3. 新アクセストークン（JWT）+ 新リフレッシュトークンを発行・保存
+</code></pre>
+<p>旧トークンは再利用不可。再利用を検知した場合、そのメンバーの全リフレッシュトークンを無効化する。</p>
+<h3>トークン失効の仕組み</h3>
+<pre><code>管理者が「このメンバーのアクセスを停止したい」場合:
+
+1. auth:member_refreshes:{member_id} から全リフレッシュトークンハッシュを取得
+2. 各 auth:refresh:{hash} を DEL
+3. auth:member_refreshes:{member_id} を DEL
+
+→ リフレッシュ不可になり、現在の JWT は最大15分で自然失効
+</code></pre>
+<hr />
+<h2>セッション</h2>
+<p>ログイン状態の管理。Cookie にセッション ID を保持し、Redis で状態管理。</p>
+<p><strong>キー:</strong> <code>auth:session:{セッションID}</code></p>
+<p><strong>TTL:</strong> 86400 秒（24時間）</p>
+<p><strong>値（JSON）:</strong></p>
+<pre><code class="language-json">{
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;username&quot;: &quot;tanaka&quot;,
+  &quot;ip_address&quot;: &quot;192.168.1.100&quot;,
+  &quot;user_agent&quot;: &quot;Mozilla/5.0...&quot;,
+  &quot;created_at&quot;: 1719196400,
+  &quot;last_accessed_at&quot;: 1719200000,
+  &quot;oauth_params&quot;: {
+    &quot;client_id&quot;: &quot;my-app&quot;,
+    &quot;redirect_uri&quot;: &quot;https://my-app.example/callback&quot;,
+    &quot;scope&quot;: &quot;read write&quot;,
+    &quot;state&quot;: &quot;random-state&quot;,
+    &quot;code_challenge&quot;: &quot;xxx&quot;,
+    &quot;code_challenge_method&quot;: &quot;S256&quot;
+  }
+}
+</code></pre>
+<p><code>oauth_params</code> は認可フロー中のみ一時的に保持。ログイン→同意→認可コード発行の間パラメータを引き継ぐ。</p>
+<p><strong>操作:</strong></p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>コマンド</th>
+<th>タイミング</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>作成</td>
+<td><code>SET auth:session:{id} {json} EX 86400</code></td>
+<td>ログイン成功時</td>
+</tr>
+<tr>
+<td>取得</td>
+<td><code>GET auth:session:{id}</code></td>
+<td>各リクエスト時</td>
+</tr>
+<tr>
+<td>更新</td>
+<td><code>SET auth:session:{id} {json} EX 86400</code></td>
+<td>last_accessed_at 更新</td>
+</tr>
+<tr>
+<td>削除</td>
+<td><code>DEL auth:session:{id}</code></td>
+<td>ログアウト時</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>メンバー別リフレッシュトークン管理</h2>
+<p>特定メンバーの全リフレッシュトークンを一括失効させるためのインデックス。</p>
+<p><strong>キー:</strong> <code>auth:member_refreshes:{member_id}</code></p>
+<p><strong>型:</strong> SET</p>
+<p><strong>値:</strong> リフレッシュトークンハッシュの集合</p>
+<p><strong>操作:</strong></p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>コマンド</th>
+<th>タイミング</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>追加</td>
+<td><code>SADD auth:member_refreshes:{member_id} {refresh_hash}</code></td>
+<td>リフレッシュトークン発行時</td>
+</tr>
+<tr>
+<td>一覧</td>
+<td><code>SMEMBERS auth:member_refreshes:{member_id}</code></td>
+<td>管理画面、一括失効時</td>
+</tr>
+<tr>
+<td>削除</td>
+<td><code>SREM auth:member_refreshes:{member_id} {refresh_hash}</code></td>
+<td>ローテーション時</td>
+</tr>
+<tr>
+<td>全削除</td>
+<td><code>DEL auth:member_refreshes:{member_id}</code> + 各 refresh DEL</td>
+<td>全トークン失効時</td>
+</tr>
+</tbody>
+</table>
+<p>※ TTL なし。リフレッシュトークン失効時に SREM で整合性を保つ。</p>
+<hr />
+<h2>Rate Limit</h2>
+<p>Sliding Window 方式で Rate Limit を実装する。</p>
+<p><strong>キー:</strong> <code>ratelimit:{対象}:{識別子}</code></p>
+<p><strong>DB:</strong> 1（Rate Limit 専用）</p>
+<h3>メンバー単位</h3>
+<p><strong>キー:</strong> <code>ratelimit:member:{member_id}</code></p>
+<p><strong>TTL:</strong> 60 秒</p>
+<pre><code>INCR ratelimit:member:{member_id}
+→ 1 の場合: EXPIRE ratelimit:member:{member_id} 60
+→ 100 超過: リクエスト拒否 (429)
+</code></pre>
+<h3>IP 単位（未認証リクエスト）</h3>
+<p><strong>キー:</strong> <code>ratelimit:ip:{ip_address}</code></p>
+<p><strong>TTL:</strong> 60 秒</p>
+<pre><code>INCR ratelimit:ip:{ip_address}
+→ 1 の場合: EXPIRE ratelimit:ip:{ip_address} 60
+→ 30 超過: リクエスト拒否 (429)
+</code></pre>
+<h3>ログイン試行（ブルートフォース対策）</h3>
+<p><strong>キー:</strong> <code>ratelimit:login:{username}</code></p>
+<p><strong>TTL:</strong> 300 秒（5分）</p>
+<pre><code>INCR ratelimit:login:{username}
+→ 5 超過: ログイン一時ロック
+</code></pre>
+<h3>Rate Limit 設定一覧</h3>
+<table>
+<thead>
+<tr>
+<th>対象</th>
+<th>キー</th>
+<th>上限</th>
+<th>ウィンドウ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>認証済みメンバー</td>
+<td><code>ratelimit:member:{member_id}</code></td>
+<td>100 req</td>
+<td>60秒</td>
+</tr>
+<tr>
+<td>未認証 IP</td>
+<td><code>ratelimit:ip:{ip}</code></td>
+<td>30 req</td>
+<td>60秒</td>
+</tr>
+<tr>
+<td>ログイン試行</td>
+<td><code>ratelimit:login:{username}</code></td>
+<td>5 回</td>
+<td>300秒</td>
+</tr>
+<tr>
+<td>/token エンドポイント</td>
+<td><code>ratelimit:token:{client_id}</code></td>
+<td>20 req</td>
+<td>60秒</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Redis 設定（推奨）</h2>
+<pre><code class="language-conf"># メモリ上限
+maxmemory 64mb
+
+# 上限到達時の挙動（TTL付きキーを優先削除）
+maxmemory-policy volatile-ttl
+
+# 永続化（AOF）
+appendonly yes
+appendfsync everysec
+
+# DB 数
+databases 2
+</code></pre>
+</body>
+</html>

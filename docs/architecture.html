@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jyogi-oauth 設計書</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.diagram { margin: 1.5rem 0; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0; overflow-x: auto; }
+.diagram-title { font-weight: 600; text-align: center; margin-bottom: 1rem; font-size: 0.9rem; color: #555; }
+.arch-grid { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.box { border-radius: 6px; padding: 0.6rem 1rem; text-align: center; font-size: 0.85rem; font-weight: 500; }
+.box-client { background: #e3f2fd; border: 2px solid #1976d2; color: #1565c0; }
+.box-nginx { background: #e8f5e9; border: 2px solid #388e3c; color: #2e7d32; min-width: 280px; }
+.box-go { background: #fff3e0; border: 2px solid #f57c00; color: #e65100; }
+.box-rust { background: #fce4ec; border: 2px solid #c62828; color: #b71c1c; }
+.box-vue { background: #e8eaf6; border: 2px solid #3f51b5; color: #283593; }
+.box-redis { background: #fff8e1; border: 2px solid #fbc02d; color: #f57f17; }
+.box-pg { background: #e0f2f1; border: 2px solid #00897b; color: #00695c; }
+.arrow { text-align: center; color: #888; font-size: 1.2rem; line-height: 1; }
+.arrow-label { font-size: 0.75rem; color: #888; }
+.row { display: flex; gap: 1rem; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+
+.flow-step { display: flex; align-items: flex-start; gap: 1rem; margin: 0.6rem 0; }
+.flow-num { background: #1976d2; color: #fff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; flex-shrink: 0; }
+.flow-content { font-size: 0.9rem; line-height: 1.5; }
+.flow-content code { font-size: 0.82rem; }
+.flow-actors { display: flex; gap: 0.3rem; margin-bottom: 0.2rem; }
+.actor { font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 3px; font-weight: 600; }
+.actor-client { background: #e3f2fd; color: #1565c0; }
+.actor-go { background: #fff3e0; color: #e65100; }
+.actor-rust { background: #fce4ec; color: #b71c1c; }
+.actor-redis { background: #fff8e1; color: #f57f17; }
+.actor-pg { background: #e0f2f1; color: #00695c; }
+.actor-browser { background: #f3e5f5; color: #6a1b9a; }
+
+.tree { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.85rem; line-height: 1.6; }
+.tree-dir { color: #1565c0; font-weight: 600; }
+.tree-file { color: #333; }
+.tree-comment { color: #888; }
+
+.phase-box { background: #f8f8f8; border-left: 4px solid #1976d2; padding: 0.8rem 1rem; margin: 0.8rem 0; border-radius: 0 4px 4px 0; }
+.phase-box h4 { margin: 0 0 0.3rem; color: #1565c0; }
+</style>
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+
+<h1>jyogi-oauth 設計書</h1>
+
+<h2>概要</h2>
+<p>部内向け OAuth 2.0 認可基盤。認可サーバー・リソースサーバー・フロントエンドを1台の Linux サーバーに Docker Compose で構築し、将来的にサーバー分離が可能な設計とする。</p>
+
+<hr>
+
+<h2>システム構成</h2>
+
+<h3>コンテナ一覧（Docker Compose）</h3>
+<table>
+<thead><tr><th>コンテナ</th><th>ポート</th><th>言語/技術</th><th>役割</th></tr></thead>
+<tbody>
+<tr><td>nginx</td><td>:80 / :443</td><td>Nginx</td><td>静的ファイル配信、リバースプロキシ</td></tr>
+<tr><td>auth-server</td><td>:8080</td><td>Go</td><td>OAuth 2.0 認可エンドポイント</td></tr>
+<tr><td>resource-server</td><td>:8081</td><td>Rust</td><td>保護された API の提供</td></tr>
+<tr><td>redis</td><td>:6379</td><td>Redis</td><td>一時データ（リフレッシュトークン、認可コード、セッション）</td></tr>
+<tr><td>postgres</td><td>:5432</td><td>PostgreSQL</td><td>永続データ（メンバー、クライアント、権限）</td></tr>
+</tbody>
+</table>
+
+<h3>アーキテクチャ図</h3>
+<div class="diagram">
+<div class="arch-grid">
+  <div class="box box-client" style="min-width:200px">クライアントアプリ</div>
+  <div class="arrow">▼</div>
+  <div class="box box-nginx">Nginx (:80/:443)<br><small>静的配信 + リバースプロキシ</small></div>
+  <div class="arrow">▼ ─── 振り分け ─── ▼</div>
+  <div class="row">
+    <div class="col">
+      <div class="box box-vue">Vue SPA (静的)<br><small>/login /consent /admin</small></div>
+    </div>
+    <div class="col">
+      <div class="box box-go">Go 認可サーバー (:8080)<br><small>/oauth/*</small></div>
+      <div class="arrow">▼</div>
+      <div class="box box-redis">Redis (:6379)<br><small>トークン・セッション</small></div>
+      <div class="arrow">▼</div>
+      <div class="box box-pg">PostgreSQL (:5432)<br><small>メンバー・クライアント</small></div>
+    </div>
+    <div class="col">
+      <div class="box box-rust">Rust リソースサーバー (:8081)<br><small>/api/*</small></div>
+      <div class="arrow">▼</div>
+      <div class="box box-pg">PostgreSQL (:5432)<br><small>Identity・業務データ</small></div>
+    </div>
+  </div>
+</div>
+<p style="text-align:center;font-size:0.85rem;color:#666">すべて Docker コンテナとして動作。コンテナ間は Docker ネットワークで通信。</p>
+</div>
+
+<hr>
+
+<h2>OAuth 2.0 フロー（Authorization Code + PKCE）</h2>
+
+<div class="diagram">
+<div class="flow-step">
+  <div class="flow-num">1</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-client">Client</span> → <span class="actor actor-go">Go</span></div>
+    <code>GET /oauth/authorize?response_type=code&amp;client_id=xxx&amp;redirect_uri=...&amp;scope=read write&amp;state=random&amp;code_challenge=xxx&amp;code_challenge_method=S256</code>
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">2</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-browser">Browser</span></div>
+    ログイン画面 (<code>/login</code>) へリダイレクト
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">3</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-browser">Member</span> → <span class="actor actor-go">Go</span></div>
+    認証情報を送信（ID/パスワード）
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">4</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-browser">Browser</span></div>
+    同意画面 (<code>/consent</code>) を表示
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">5</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-browser">Member</span> → <span class="actor actor-go">Go</span></div>
+    同意を送信
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">6</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-redis">Redis</span></div>
+    認可コードを保存（TTL: 600秒）
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">7</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-client">Client</span></div>
+    <code>redirect_uri</code> に認可コード付きでリダイレクト: <code>?code=auth_code&amp;state=random</code>
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">8</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-client">Client</span> → <span class="actor actor-go">Go</span></div>
+    <code>POST /oauth/token</code> &mdash; <code>grant_type=authorization_code&amp;code=...&amp;redirect_uri=...&amp;client_id=...&amp;code_verifier=...</code>
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">9</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-redis">Redis</span></div>
+    認可コードを検証・削除 → PKCE 検証 → JWT 署名（15分）→ リフレッシュトークン保存（7日）
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">10</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-client">Client</span></div>
+    トークンレスポンス: <code>{ access_token(JWT), refresh_token, token_type, expires_in: 900, scope }</code>
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">11</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-client">Client</span> → <span class="actor actor-rust">Rust</span></div>
+    <code>GET /api/resource</code> &mdash; <code>Authorization: Bearer &lt;access_token&gt;</code>
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">12</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-rust">Rust</span> → <span class="actor actor-pg">PostgreSQL</span></div>
+    JWT 署名検証 + exp チェック（Redis参照なし）→ リソース取得
+  </div>
+</div>
+<div class="flow-step">
+  <div class="flow-num">13</div>
+  <div class="flow-content">
+    <div class="flow-actors"><span class="actor actor-rust">Rust</span> → <span class="actor actor-client">Client</span></div>
+    リソースレスポンス
+  </div>
+</div>
+</div>
+
+<hr>
+
+<h2>データ設計</h2>
+
+<h3>Redis（一時データ）</h3>
+<table>
+<thead><tr><th>キー</th><th>値</th><th>TTL</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>auth:code:{認可コード}</code></td><td><code>{client_id, member_id, scope, code_challenge, redirect_uri}</code></td><td>600秒</td><td>認可コード</td></tr>
+<tr><td><code>auth:refresh:{hash}</code></td><td><code>{member_id, client_id, scope}</code></td><td>604800秒</td><td>リフレッシュトークン</td></tr>
+<tr><td><code>auth:session:{id}</code></td><td><code>{member_id, oauth_params}</code></td><td>86400秒</td><td>メンバーセッション</td></tr>
+<tr><td><code>auth:member_refreshes:{member_id}</code></td><td>SET of refresh hashes</td><td>なし</td><td>メンバー別失効管理</td></tr>
+<tr><td><code>ratelimit:*</code></td><td>カウント</td><td>60〜300秒</td><td>Rate Limit</td></tr>
+</tbody>
+</table>
+<p class="note">アクセストークンは JWT（TTL: 15分）のため Redis に保存しない。失効制御はリフレッシュトークンの削除で対応。</p>
+
+<h3>PostgreSQL（永続データ）</h3>
+<h4>members テーブル</h4>
+<table>
+<thead><tr><th>カラム</th><th>型</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td>id</td><td>UUID</td><td>主キー</td></tr>
+<tr><td>username</td><td>VARCHAR(255)</td><td>ログイン用ユーザー名</td></tr>
+<tr><td>password_hash</td><td>VARCHAR(255)</td><td>argon2id ハッシュ</td></tr>
+<tr><td>email</td><td>VARCHAR(255)</td><td>メールアドレス</td></tr>
+<tr><td>role</td><td>VARCHAR(50)</td><td>ロール（member / moderator / admin）</td></tr>
+<tr><td>is_active</td><td>BOOLEAN</td><td>有効/無効</td></tr>
+<tr><td>created_at</td><td>TIMESTAMP</td><td>作成日時</td></tr>
+<tr><td>updated_at</td><td>TIMESTAMP</td><td>更新日時</td></tr>
+</tbody>
+</table>
+
+<h4>clients テーブル</h4>
+<table>
+<thead><tr><th>カラム</th><th>型</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td>id</td><td>UUID</td><td>主キー</td></tr>
+<tr><td>client_id</td><td>VARCHAR(255)</td><td>OAuth クライアント ID</td></tr>
+<tr><td>client_secret_hash</td><td>VARCHAR(255)</td><td>シークレットのハッシュ</td></tr>
+<tr><td>name</td><td>VARCHAR(255)</td><td>アプリ名</td></tr>
+<tr><td>redirect_uris</td><td>TEXT[]</td><td>許可されたリダイレクト URI</td></tr>
+<tr><td>allowed_scopes</td><td>TEXT[]</td><td>許可されたスコープ</td></tr>
+<tr><td>client_type</td><td>VARCHAR(50)</td><td>confidential / public</td></tr>
+<tr><td>is_active</td><td>BOOLEAN</td><td>有効/無効</td></tr>
+<tr><td>created_at</td><td>TIMESTAMP</td><td>作成日時</td></tr>
+</tbody>
+</table>
+
+<h4>scopes テーブル</h4>
+<table>
+<thead><tr><th>カラム</th><th>型</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td>id</td><td>UUID</td><td>主キー</td></tr>
+<tr><td>name</td><td>VARCHAR(100)</td><td>スコープ名（例: read, write, admin）</td></tr>
+<tr><td>description</td><td>TEXT</td><td>スコープの説明</td></tr>
+</tbody>
+</table>
+
+<h4>consent_records テーブル</h4>
+<table>
+<thead><tr><th>カラム</th><th>型</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td>id</td><td>UUID</td><td>主キー</td></tr>
+<tr><td>member_id</td><td>UUID</td><td>FK → members</td></tr>
+<tr><td>client_id</td><td>UUID</td><td>FK → clients</td></tr>
+<tr><td>scopes</td><td>TEXT[]</td><td>同意済みスコープ</td></tr>
+<tr><td>granted_at</td><td>TIMESTAMP</td><td>同意日時</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>各サーバーの詳細</h2>
+
+<h3>Go 認可サーバー (:8080)</h3>
+
+<h4>OAuth コア</h4>
+<table>
+<thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td><code>GET</code></td><td>/oauth/authorize</td><td>認可リクエスト</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/token</td><td>トークン発行</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/revoke</td><td>トークン失効</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/jwks</td><td>公開鍵 (JWKS)</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/introspect</td><td>トークンイントロスペクション</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/userinfo</td><td>メンバー情報</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/login</td><td>ログイン認証</td></tr>
+<tr><td><code>GET/POST</code></td><td>/oauth/consent</td><td>同意情報取得・処理</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/logout</td><td>ログアウト</td></tr>
+</tbody>
+</table>
+
+<h4>ダッシュボード API（セッション認証）</h4>
+<table>
+<thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td><code>GET</code></td><td>/oauth/me</td><td>自分のメンバー情報 + Identity</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/me/identity</td><td>Identity 単体取得</td></tr>
+<tr><td><code>PUT</code></td><td>/oauth/me/identity</td><td>プロフィール更新（tagline含む）</td></tr>
+<tr><td><code>PUT</code></td><td>/oauth/me/password</td><td>パスワード変更</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/me/consents</td><td>連携アプリ一覧</td></tr>
+<tr><td><code>DELETE</code></td><td>/oauth/me/consents/{client_id}</td><td>連携取り消し</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/me/clients</td><td>自分のクライアント一覧</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/me/clients</td><td>クライアント作成</td></tr>
+<tr><td><code>PUT</code></td><td>/oauth/me/clients/{id}</td><td>クライアント更新</td></tr>
+<tr><td><code>DELETE</code></td><td>/oauth/me/clients/{id}</td><td>クライアント削除</td></tr>
+</tbody>
+</table>
+
+<h4>管理 API</h4>
+<table>
+<thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td><code>CRUD</code></td><td>/oauth/admin/members</td><td>メンバー管理</td></tr>
+<tr><td><code>CRUD</code></td><td>/oauth/admin/clients</td><td>クライアント管理</td></tr>
+</tbody>
+</table>
+<p><strong>依存:</strong> Redis（トークン・セッション）、PostgreSQL（メンバー認証・クライアント検証）</p>
+
+<h3>Rust リソースサーバー (:8081)</h3>
+<table>
+<thead><tr><th>メソッド</th><th>パス</th><th>スコープ</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td><code>GET</code></td><td>/api/health</td><td>-</td><td>ヘルスチェック</td></tr>
+<tr><td><code>GET</code></td><td>/api/v1/members/me/identity</td><td>identity</td><td>自分の Identity 取得</td></tr>
+<tr><td><code>PUT</code></td><td>/api/v1/members/me/identity</td><td>identity:write</td><td>自分の Identity 更新</td></tr>
+<tr><td><code>GET</code></td><td>/api/v1/members/{id}/identity</td><td>identity</td><td>メンバーの Identity 取得</td></tr>
+<tr><td><code>GET</code></td><td>/api/v1/members/identities?ids=</td><td>identity</td><td>バッチ取得（最大50件）</td></tr>
+</tbody>
+</table>
+<p><strong>依存:</strong> PostgreSQL（Identity データ）、Go 認可サーバー（JWKS 公開鍵取得）</p>
+
+<hr>
+
+<h2>フロントエンド（Vue SPA）</h2>
+<p>Nginx が静的ファイルとして配信。CSR（クライアントサイドレンダリング）。Vite + TypeScript + Pinia。</p>
+<table>
+<thead><tr><th>パス</th><th>画面</th><th>説明</th></tr></thead>
+<tbody>
+<tr><td>/</td><td>ホーム</td><td>サービス紹介、ログインボタン</td></tr>
+<tr><td>/login</td><td>ログイン</td><td>ID/パスワード認証フォーム</td></tr>
+<tr><td>/consent</td><td>認可同意</td><td>OAuthフロー中のスコープ許可確認</td></tr>
+<tr><td>/dashboard</td><td>ダッシュボード</td><td>3タブ構成（下記参照）</td></tr>
+<tr><td>/admin</td><td>管理画面トップ</td><td>moderator / admin のみ表示</td></tr>
+<tr><td>/admin/members</td><td>メンバー管理</td><td>一覧・作成・ロール変更・有効/無効切替</td></tr>
+<tr><td>/admin/clients</td><td>クライアント管理</td><td>全クライアント一覧・無効化（admin のみ）</td></tr>
+</tbody>
+</table>
+<h4>ダッシュボード タブ（/dashboard）</h4>
+<table>
+<thead><tr><th>タブ</th><th>機能</th></tr></thead>
+<tbody>
+<tr><td>Profile</td><td>表示名・アバターURL・テーマカラーの編集、リアルタイムプレビュー</td></tr>
+<tr><td>Connected Apps</td><td>自分が許可した連携アプリ一覧、スコープ表示、アクセス取り消し</td></tr>
+<tr><td>My Clients</td><td>自分のOAuthクライアント作成・管理、client_secret の一度きり表示</td></tr>
+</tbody>
+</table>
+<h4>管理画面（/admin）</h4>
+<table>
+<thead><tr><th>ページ</th><th>必要ロール</th><th>機能</th></tr></thead>
+<tbody>
+<tr><td>Overview</td><td>moderator+</td><td>管理メニュー</td></tr>
+<tr><td>Members</td><td>moderator+</td><td>メンバー一覧、作成、有効/無効化。ロール変更は admin のみ</td></tr>
+<tr><td>Clients</td><td>admin</td><td>全クライアント一覧、無効化</td></tr>
+</tbody>
+</table>
+
+<h3>ロールシステム</h3>
+<table>
+<thead><tr><th>ロール</th><th>権限</th></tr></thead>
+<tbody>
+<tr><td><code>member</code></td><td>プロフィール編集、連携アプリ管理、自分のクライアント管理</td></tr>
+<tr><td><code>moderator</code></td><td>member + メンバー管理</td></tr>
+<tr><td><code>admin</code></td><td>全操作（メンバー・クライアント・スコープ・システム設定）</td></tr>
+</tbody>
+</table>
+<p class="note">root メンバー（username: <code>root</code> / password: <code>65536</code> / role: <code>admin</code>）はDB初期化時に自動作成される。</p>
+
+<hr>
+
+<h2>将来の分離計画</h2>
+
+<div class="diagram">
+<div class="diagram-title">フェーズ 1（現在）</div>
+<div class="row">
+  <div class="box" style="background:#f0f4ff;border:2px solid #5c6bc0;color:#283593;min-width:400px">
+    <strong>Linux 1台</strong><br>
+    <div class="row" style="margin-top:0.5rem;gap:0.4rem;flex-wrap:wrap;justify-content:center">
+      <span class="actor" style="background:#e8f5e9;color:#2e7d32">Nginx</span>
+      <span class="actor" style="background:#fff3e0;color:#e65100">Go</span>
+      <span class="actor" style="background:#fce4ec;color:#b71c1c">Rust</span>
+      <span class="actor" style="background:#fff8e1;color:#f57f17">Redis</span>
+      <span class="actor" style="background:#e0f2f1;color:#00695c">PostgreSQL</span>
+    </div>
+  </div>
+</div>
+<div class="arrow" style="margin:1rem 0">▼ 分離</div>
+<div class="diagram-title">フェーズ 2（負荷増大時）</div>
+<div class="row" style="gap:0.8rem">
+  <div class="box" style="background:#e8f5e9;border:2px solid #388e3c;color:#1b5e20">
+    <strong>Linux A</strong><br>
+    <small>Nginx + Vue SPA</small>
+  </div>
+  <div class="box" style="background:#fff3e0;border:2px solid #f57c00;color:#e65100">
+    <strong>Linux B</strong><br>
+    <small>Go + Redis</small>
+  </div>
+  <div class="box" style="background:#fce4ec;border:2px solid #c62828;color:#b71c1c">
+    <strong>Linux C</strong><br>
+    <small>Rust + PostgreSQL</small>
+  </div>
+</div>
+</div>
+<p><strong>分離時の変更点:</strong> Nginx の proxy_pass を IP に変更、環境変数で接続先切替、docker-compose.yml を分割。<strong>コード変更不要。</strong></p>
+
+<hr>
+
+<h2>プロジェクト構造</h2>
+<div class="diagram">
+<div class="tree">
+<span class="tree-dir">jyogi-oauth/</span><br>
+├── <span class="tree-dir">docs/</span> <span class="tree-comment">— 設計ドキュメント</span><br>
+├── <span class="tree-dir">auth-server/</span> <span class="tree-comment">— Go 認可サーバー</span><br>
+│   ├── <span class="tree-file">Dockerfile</span><br>
+│   ├── <span class="tree-dir">cmd/server/</span> <span class="tree-comment">— エントリポイント</span><br>
+│   ├── <span class="tree-dir">cmd/seed/</span> <span class="tree-comment">— 初期管理者作成CLI</span><br>
+│   └── <span class="tree-dir">internal/</span><br>
+│       ├── <span class="tree-dir">config/</span> <span class="tree-comment">— 設定読み込み</span><br>
+│       ├── <span class="tree-dir">handler/</span> <span class="tree-comment">— HTTP ハンドラ</span><br>
+│       ├── <span class="tree-dir">middleware/</span> <span class="tree-comment">— セッション・Rate Limit</span><br>
+│       ├── <span class="tree-dir">model/</span> <span class="tree-comment">— ドメインモデル</span><br>
+│       ├── <span class="tree-dir">oauth/</span> <span class="tree-comment">— JWT・PKCE・パスワード</span><br>
+│       └── <span class="tree-dir">store/</span> <span class="tree-comment">— DB/Redis アクセス</span><br>
+├── <span class="tree-dir">resource-server/</span> <span class="tree-comment">— Rust リソースサーバー</span><br>
+│   ├── <span class="tree-file">Dockerfile</span><br>
+│   └── <span class="tree-dir">src/</span><br>
+│       ├── <span class="tree-file">main.rs</span>, <span class="tree-file">config.rs</span><br>
+│       ├── <span class="tree-file">auth.rs</span> <span class="tree-comment">— Bearer 認証・スコープ検証</span><br>
+│       ├── <span class="tree-file">jwt.rs</span> <span class="tree-comment">— JWKS/JWT 検証</span><br>
+│       ├── <span class="tree-dir">handler/</span> <span class="tree-comment">— HTTP ハンドラ（identity, health）</span><br>
+│       └── <span class="tree-dir">db/</span> <span class="tree-comment">— PostgreSQL アクセス（identity）</span><br>
+├── <span class="tree-dir">web/</span> <span class="tree-comment">— Vue SPA フロントエンド</span><br>
+├── <span class="tree-dir">migrations/</span> <span class="tree-comment">— PostgreSQL マイグレーション</span><br>
+├── <span class="tree-dir">nginx/</span> <span class="tree-comment">— Nginx 設定</span><br>
+├── <span class="tree-dir">config/</span> <span class="tree-comment">— .env.dev / .env.prod</span><br>
+├── <span class="tree-dir">keys/</span> <span class="tree-comment">— ES256 鍵ペア</span><br>
+└── <span class="tree-file">docker-compose.yml</span>
+</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>認可サーバー API 設計</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>認可サーバー API 設計</h1>
+<h2>ベース URL</h2>
+<pre><code>http://127.0.0.1:8080
+Nginx 経由: https://oauth.example.internal/oauth/*
+</code></pre>
+<hr />
+<h2>ヘルスチェック</h2>
+<h3><span class="method method-get">GET</span> /oauth/health</h3>
+<p>認証不要。PostgreSQL / Redis の接続状態を返す。</p>
+<pre><code class="language-json">{
+  "status": "healthy",
+  "service": "auth-server",
+  "dependencies": {
+    "postgresql": "connected",
+    "redis": "connected"
+  }
+}</code></pre>
+<hr />
+<h2>認可エンドポイント</h2>
+<h3><span class="method method-get">GET</span> /oauth/authorize</h3>
+<p>認可コードの発行を開始する。メンバーをログイン→同意画面へ誘導。</p>
+<p><strong>リクエスト（クエリパラメータ）:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>response_type</td>
+<td>Yes</td>
+<td><code>code</code> 固定</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>Yes</td>
+<td>OAuth クライアント ID</td>
+</tr>
+<tr>
+<td>redirect_uri</td>
+<td>Yes</td>
+<td>コールバック URI（クライアント登録済みのもの）</td>
+</tr>
+<tr>
+<td>scope</td>
+<td>Yes</td>
+<td>要求するスコープ（スペース区切り）</td>
+</tr>
+<tr>
+<td>state</td>
+<td>Yes</td>
+<td>CSRF 対策用ランダム文字列</td>
+</tr>
+<tr>
+<td>code_challenge</td>
+<td>Yes</td>
+<td>PKCE チャレンジ（S256）</td>
+</tr>
+<tr>
+<td>code_challenge_method</td>
+<td>Yes</td>
+<td><code>S256</code> 固定</td>
+</tr>
+</tbody>
+</table>
+<p><strong>処理フロー:</strong></p>
+<pre><code>1. client_id, redirect_uri の検証
+2. 未ログイン → /login へリダイレクト（パラメータを session に保存）
+3. ログイン済み → 同意済みか確認
+4. 未同意 → /consent へリダイレクト
+5. 同意済み → 認可コード発行 → redirect_uri へリダイレクト
+</code></pre>
+<p><strong>成功レスポンス（リダイレクト）:</strong></p>
+<pre><code>HTTP/1.1 302 Found
+Location: {redirect_uri}?code={auth_code}&amp;state={state}
+</code></pre>
+<p><strong>エラーレスポンス（リダイレクト）:</strong></p>
+<pre><code>HTTP/1.1 302 Found
+Location: {redirect_uri}?error={error_code}&amp;error_description={description}&amp;state={state}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>error_code</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>invalid_request</td>
+<td>パラメータ不足・不正</td>
+</tr>
+<tr>
+<td>unauthorized_client</td>
+<td>クライアントに権限がない</td>
+</tr>
+<tr>
+<td>access_denied</td>
+<td>メンバーが同意を拒否</td>
+</tr>
+<tr>
+<td>unsupported_response_type</td>
+<td>response_type が未対応</td>
+</tr>
+<tr>
+<td>invalid_scope</td>
+<td>無効なスコープ</td>
+</tr>
+<tr>
+<td>server_error</td>
+<td>サーバーエラー</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>トークンエンドポイント</h2>
+<h3>POST /oauth/token</h3>
+<p>認可コードをアクセストークンに交換する。リフレッシュトークンによる再発行にも使用。</p>
+<p><strong>Content-Type:</strong> <code>application/x-www-form-urlencoded</code></p>
+<h4>Grant Type: authorization_code</h4>
+<p><strong>リクエストボディ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>grant_type</td>
+<td>Yes</td>
+<td><code>authorization_code</code></td>
+</tr>
+<tr>
+<td>code</td>
+<td>Yes</td>
+<td>認可コード</td>
+</tr>
+<tr>
+<td>redirect_uri</td>
+<td>Yes</td>
+<td>/authorize 時と同一の URI</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>Yes</td>
+<td>クライアント ID</td>
+</tr>
+<tr>
+<td>client_secret</td>
+<td>Confidential のみ</td>
+<td>クライアントシークレット</td>
+</tr>
+<tr>
+<td>code_verifier</td>
+<td>Yes</td>
+<td>PKCE 検証用の元文字列</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+
+{
+  &quot;access_token&quot;: &quot;eyJhbGciOiJSUzI1NiIs...&quot;,
+  &quot;token_type&quot;: &quot;Bearer&quot;,
+  &quot;expires_in&quot;: 900,
+  &quot;refresh_token&quot;: &quot;dGhpcyBpcyBhIHJlZnJlc2g...&quot;,
+  &quot;scope&quot;: &quot;read write&quot;
+}
+</code></pre>
+<h4>Grant Type: refresh_token</h4>
+<p><strong>リクエストボディ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>grant_type</td>
+<td>Yes</td>
+<td><code>refresh_token</code></td>
+</tr>
+<tr>
+<td>refresh_token</td>
+<td>Yes</td>
+<td>リフレッシュトークン</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>Yes</td>
+<td>クライアント ID</td>
+</tr>
+<tr>
+<td>client_secret</td>
+<td>Confidential のみ</td>
+<td>クライアントシークレット</td>
+</tr>
+<tr>
+<td>scope</td>
+<td>No</td>
+<td>スコープの縮小（元のスコープ以下）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong> authorization_code と同一形式</p>
+<h4>Grant Type: client_credentials</h4>
+<p><strong>リクエストボディ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>grant_type</td>
+<td>Yes</td>
+<td><code>client_credentials</code></td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>Yes</td>
+<td>クライアント ID</td>
+</tr>
+<tr>
+<td>client_secret</td>
+<td>Yes</td>
+<td>クライアントシークレット</td>
+</tr>
+<tr>
+<td>scope</td>
+<td>No</td>
+<td>要求するスコープ</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;access_token&quot;: &quot;eyJhbGciOiJSUzI1NiIs...&quot;,
+  &quot;token_type&quot;: &quot;Bearer&quot;,
+  &quot;expires_in&quot;: 900,
+  &quot;scope&quot;: &quot;read&quot;
+}
+</code></pre>
+<p>※ refresh_token は発行しない</p>
+<p><strong>エラーレスポンス（共通）:</strong></p>
+<pre><code class="language-json">HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  &quot;error&quot;: &quot;invalid_grant&quot;,
+  &quot;error_description&quot;: &quot;Authorization code has expired&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>error</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>invalid_request</td>
+<td>パラメータ不足・不正</td>
+</tr>
+<tr>
+<td>invalid_client</td>
+<td>クライアント認証失敗</td>
+</tr>
+<tr>
+<td>invalid_grant</td>
+<td>認可コード / リフレッシュトークンが無効</td>
+</tr>
+<tr>
+<td>unauthorized_client</td>
+<td>このクライアントには許可されていない grant_type</td>
+</tr>
+<tr>
+<td>unsupported_grant_type</td>
+<td>未対応の grant_type</td>
+</tr>
+<tr>
+<td>invalid_scope</td>
+<td>無効なスコープ</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>トークン失効</h2>
+<h3>POST /oauth/revoke</h3>
+<p>発行済みトークンを無効化する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>token</td>
+<td>Yes</td>
+<td>失効させるトークン</td>
+</tr>
+<tr>
+<td>token_type_hint</td>
+<td>No</td>
+<td><code>access_token</code> or <code>refresh_token</code></td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>Yes</td>
+<td>クライアント ID</td>
+</tr>
+<tr>
+<td>client_secret</td>
+<td>Confidential のみ</td>
+<td>クライアントシークレット</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code>HTTP/1.1 200 OK
+</code></pre>
+<p>※ トークンが存在しない場合も 200 を返す（RFC 7009）</p>
+<hr />
+<h2>トークンイントロスペクション</h2>
+<h3>POST /oauth/introspect</h3>
+<p>トークンの有効性と付随情報を返す。リソースサーバーが利用。</p>
+<p><strong>リクエストボディ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>token</td>
+<td>Yes</td>
+<td>検証対象のトークン</td>
+</tr>
+<tr>
+<td>token_type_hint</td>
+<td>No</td>
+<td><code>access_token</code> or <code>refresh_token</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>認証:</strong> リソースサーバーの認証情報（Basic 認証 or Bearer トークン）</p>
+<p><strong>成功レスポンス（有効）:</strong></p>
+<pre><code class="language-json">{
+  &quot;active&quot;: true,
+  &quot;scope&quot;: &quot;read write&quot;,
+  &quot;client_id&quot;: &quot;my-app&quot;,
+  &quot;username&quot;: &quot;tanaka&quot;,
+  &quot;token_type&quot;: &quot;Bearer&quot;,
+  &quot;exp&quot;: 1719200000,
+  &quot;iat&quot;: 1719196400,
+  &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;
+}
+</code></pre>
+<p><strong>成功レスポンス（無効）:</strong></p>
+<pre><code class="language-json">{
+  &quot;active&quot;: false
+}
+</code></pre>
+<hr />
+<h2>JWKS エンドポイント</h2>
+<h3>GET /oauth/jwks</h3>
+<p>JWT 検証用の公開鍵を JSON Web Key Set 形式で返す。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;keys&quot;: [
+    {
+      &quot;kty&quot;: &quot;RSA&quot;,
+      &quot;use&quot;: &quot;sig&quot;,
+      &quot;kid&quot;: &quot;key-2024-01&quot;,
+      &quot;alg&quot;: &quot;RS256&quot;,
+      &quot;n&quot;: &quot;0vx7agoebGcQ...&quot;,
+      &quot;e&quot;: &quot;AQAB&quot;
+    }
+  ]
+}
+</code></pre>
+<p><strong>キャッシュ:</strong> <code>Cache-Control: public, max-age=3600</code></p>
+<hr />
+<h2>メンバー情報</h2>
+<h3>GET /oauth/userinfo</h3>
+<p>アクセストークンに紐づくメンバー情報を返す。</p>
+<p><strong>認証:</strong> <code>Authorization: Bearer {access_token}</code></p>
+<p><strong>必要スコープ:</strong> <code>openid</code>（または <code>profile</code>）</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;username&quot;: &quot;tanaka&quot;,
+  &quot;email&quot;: &quot;tanaka@example.internal&quot;,
+  &quot;name&quot;: &quot;田中 太郎&quot;
+}
+</code></pre>
+<p><strong>エラーレスポンス:</strong></p>
+<pre><code>HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
+</code></pre>
+<hr />
+<h2>認証 API（フロントエンド向け）</h2>
+<h3>POST /oauth/login</h3>
+<p>ログインフォームからの認証リクエストを処理する。</p>
+<p><strong>リクエストボディ（JSON）:</strong></p>
+<pre><code class="language-json">{
+  &quot;username&quot;: &quot;tanaka&quot;,
+  &quot;password&quot;: &quot;secure_password&quot;
+}
+</code></pre>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 200 OK
+
+{
+  &quot;redirect_to&quot;: &quot;/oauth/authorize?...&quot;
+}
+</code></pre>
+<p>セッション Cookie を発行し、元の認可フローに戻す。</p>
+<p><strong>エラーレスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 401 Unauthorized
+
+{
+  &quot;error&quot;: &quot;invalid_credentials&quot;,
+  &quot;error_description&quot;: &quot;Username or password is incorrect&quot;
+}
+</code></pre>
+<h3>POST /oauth/consent</h3>
+<p>同意フォームからのリクエストを処理する。</p>
+<p><strong>リクエストボディ（JSON）:</strong></p>
+<pre><code class="language-json">{
+  &quot;consent_id&quot;: &quot;session-stored-id&quot;,
+  &quot;approved&quot;: true,
+  &quot;scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
+}
+</code></pre>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;redirect_to&quot;: &quot;https://client-app.example/callback?code=xxx&amp;state=yyy&quot;
+}
+</code></pre>
+<hr />
+<h2>管理 API（管理画面向け）</h2>
+<p>セッション Cookie 認証 + ロールチェックで保護。</p>
+<table>
+<thead><tr><th>エンドポイント</th><th>必要ロール</th></tr></thead>
+<tbody>
+<tr><td><code>/oauth/admin/members/*</code></td><td>moderator 以上</td></tr>
+<tr><td><code>/oauth/admin/clients/*</code></td><td>admin のみ</td></tr>
+</tbody>
+</table>
+<p>ロール変更（<code>PUT /oauth/admin/members/{id}</code> の <code>role</code> フィールド）は admin のみ実行可能。</p>
+<h3>クライアント管理</h3>
+<h4>GET /oauth/admin/clients</h4>
+<p>クライアント一覧を取得する。</p>
+<p><strong>クエリパラメータ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>page</td>
+<td>No</td>
+<td>ページ番号（デフォルト: 1）</td>
+</tr>
+<tr>
+<td>per_page</td>
+<td>No</td>
+<td>件数（デフォルト: 20, 最大: 100）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;clients&quot;: [
+    {
+      &quot;id&quot;: &quot;550e8400-...&quot;,
+      &quot;client_id&quot;: &quot;my-app&quot;,
+      &quot;name&quot;: &quot;My Application&quot;,
+      &quot;client_type&quot;: &quot;confidential&quot;,
+      &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
+      &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+      &quot;is_active&quot;: true,
+      &quot;created_at&quot;: &quot;2026-01-15T09:00:00Z&quot;
+    }
+  ],
+  &quot;total&quot;: 5,
+  &quot;page&quot;: 1,
+  &quot;per_page&quot;: 20
+}
+</code></pre>
+<h4>POST /oauth/admin/clients</h4>
+<p>クライアントを新規登録する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;My Application&quot;,
+  &quot;client_type&quot;: &quot;confidential&quot;,
+  &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
+  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
+}
+</code></pre>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 201 Created
+
+{
+  &quot;id&quot;: &quot;550e8400-...&quot;,
+  &quot;client_id&quot;: &quot;generated-client-id&quot;,
+  &quot;client_secret&quot;: &quot;generated-secret-shown-only-once&quot;,
+  &quot;name&quot;: &quot;My Application&quot;,
+  &quot;client_type&quot;: &quot;confidential&quot;,
+  &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
+  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+  &quot;is_active&quot;: true,
+  &quot;created_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
+}
+</code></pre>
+<p>※ <code>client_secret</code> はこのレスポンスでのみ平文表示。以降はハッシュ保存。</p>
+<h4>GET /oauth/admin/clients/{id}</h4>
+<p>クライアント詳細を取得する。</p>
+<h4>PUT /oauth/admin/clients/{id}</h4>
+<p>クライアント情報を更新する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;Updated App Name&quot;,
+  &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;, &quot;https://my-app.example/callback2&quot;],
+  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;, &quot;admin&quot;],
+  &quot;is_active&quot;: true
+}
+</code></pre>
+<h4>DELETE /oauth/admin/clients/{id}</h4>
+<p>クライアントを削除する（論理削除: is_active = false）。</p>
+<h3>メンバー管理</h3>
+<h4>GET /oauth/admin/members</h4>
+<p>メンバー一覧を取得する。</p>
+<p><strong>クエリパラメータ:</strong> <code>page</code>, <code>per_page</code>（クライアント管理と同様）</p>
+<h4>POST /oauth/admin/members</h4>
+<p>メンバーを新規登録する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  &quot;username&quot;: &quot;tanaka&quot;,
+  &quot;password&quot;: &quot;initial_password&quot;,
+  &quot;email&quot;: &quot;tanaka@example.internal&quot;,
+  &quot;name&quot;: &quot;田中 太郎&quot;
+}
+</code></pre>
+<h4>GET /oauth/admin/members/{id}</h4>
+<h4>PUT /oauth/admin/members/{id}</h4>
+<h4>DELETE /oauth/admin/members/{id}</h4>
+<h3>スコープ管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
+<p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。スコープは現在マイグレーションの初期データで管理。</p>
+<h4>GET /oauth/admin/scopes</h4>
+<h4>POST /oauth/admin/scopes</h4>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;read&quot;,
+  &quot;description&quot;: &quot;リソースの読み取り権限&quot;
+}
+</code></pre>
+<h4>PUT /oauth/admin/scopes/{id}</h4>
+<h4>DELETE /oauth/admin/scopes/{id}</h4>
+<h3>トークン管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
+<p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。トークン失効は <code>POST /oauth/revoke</code> で対応。</p>
+<h4>GET /oauth/admin/tokens</h4>
+<p>発行済みトークン一覧を取得する。</p>
+<p><strong>クエリパラメータ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>No</td>
+<td>メンバーで絞り込み</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>No</td>
+<td>クライアントで絞り込み</td>
+</tr>
+<tr>
+<td>page</td>
+<td>No</td>
+<td>ページ番号</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;tokens&quot;: [
+    {
+      &quot;token_id&quot;: &quot;hash-of-token&quot;,
+      &quot;member_id&quot;: &quot;550e8400-...&quot;,
+      &quot;username&quot;: &quot;tanaka&quot;,
+      &quot;client_id&quot;: &quot;my-app&quot;,
+      &quot;scope&quot;: &quot;read write&quot;,
+      &quot;issued_at&quot;: &quot;2026-06-24T09:00:00Z&quot;,
+      &quot;expires_at&quot;: &quot;2026-06-24T10:00:00Z&quot;
+    }
+  ],
+  &quot;total&quot;: 12,
+  &quot;page&quot;: 1,
+  &quot;per_page&quot;: 20
+}
+</code></pre>
+<h4>DELETE /oauth/admin/tokens/{token_id}</h4>
+<p>指定トークンを失効させる。</p>
+<hr />
+<h2>ダッシュボード API（セッション認証）</h2>
+<p>ログイン済みメンバーが自身の情報を管理するためのエンドポイント。セッション Cookie で認証。</p>
+
+<h3><span class="method method-get">GET</span> /oauth/me</h3>
+<p>ログイン中のメンバー情報と Identity を取得する。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "member": {
+    "id": "uuid",
+    "username": "tanaka",
+    "email": "tanaka@example.internal",
+    "role": "member",
+    "is_active": true,
+    "created_at": "...",
+    "updated_at": "..."
+  },
+  "identity": {
+    "member_id": "uuid",
+    "display_name": "田中 太郎",
+    "avatar_url": null,
+    "theme_color": "#4A90D9",
+    "tagline": "Engineer",
+    "updated_at": "..."
+  }
+}</code></pre>
+
+<h3><span class="method method-get">GET</span> /oauth/me/identity</h3>
+<p>自分の Identity のみを取得する。<code>GET /oauth/me</code> と異なり、メンバー情報を含まない。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "member_id": "uuid",
+  "display_name": "田中 太郎",
+  "avatar_url": null,
+  "theme_color": "#4A90D9",
+  "tagline": "Engineer",
+  "updated_at": "..."
+}</code></pre>
+
+<h3><span class="method method-put">PUT</span> /oauth/me/identity</h3>
+<p>自分のプロフィール（Identity）を作成・更新する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  "display_name": "田中 太郎",
+  "avatar_url": "https://...",
+  "theme_color": "#4A90D9",
+  "tagline": "Engineer"
+}</code></pre>
+<table>
+<thead><tr><th>フィールド</th><th>ルール</th></tr></thead>
+<tbody>
+<tr><td>display_name</td><td>必須、1〜100文字</td></tr>
+<tr><td>avatar_url</td><td>任意、URL形式</td></tr>
+<tr><td>theme_color</td><td>必須、HEXカラーコード（#RRGGBB）</td></tr>
+<tr><td>tagline</td><td>任意、1〜8文字</td></tr>
+</tbody>
+</table>
+
+<h3><span class="method method-put">PUT</span> /oauth/me/password</h3>
+<p>自分のパスワードを変更する。現在のパスワードの確認が必要。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  "current_password": "OldPass123",
+  "new_password": "NewPass456"
+}</code></pre>
+<table>
+<thead><tr><th>フィールド</th><th>ルール</th></tr></thead>
+<tbody>
+<tr><td>current_password</td><td>必須、現在のパスワード</td></tr>
+<tr><td>new_password</td><td>必須、8〜128文字、大文字・小文字・数字のうち2種以上、ユーザー名と同一不可</td></tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 200 OK
+
+{
+  "status": "password_changed"
+}</code></pre>
+<p><strong>エラーレスポンス（現パスワード不一致）:</strong></p>
+<pre><code class="language-json">HTTP/1.1 400 Bad Request
+
+{
+  "error": {
+    "code": "invalid_password",
+    "message": "Current password is incorrect"
+  }
+}</code></pre>
+
+<h3><span class="method method-get">GET</span> /oauth/me/consents</h3>
+<p>自分が許可した連携アプリ一覧を取得する。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "consents": [
+    {
+      "client_id": "uuid",
+      "client_name": "My App",
+      "scopes": ["read", "identity"],
+      "granted_at": "2026-06-25T00:00:00Z"
+    }
+  ]
+}</code></pre>
+
+<h3><span class="method method-delete">DELETE</span> /oauth/me/consents/{client_id}</h3>
+<p>指定アプリの連携を取り消す。</p>
+
+<h3><span class="method method-post">POST</span> /oauth/logout</h3>
+<p>ログアウト。セッションを破棄し、Cookie を削除する。</p>
+
+<hr />
+<h2>クライアント自己管理 API（セッション認証）</h2>
+<p>メンバーが自分のOAuthクライアントを管理するエンドポイント。<code>created_by</code> が自分のクライアントのみ操作可能。</p>
+
+<h3><span class="method method-get">GET</span> /oauth/me/clients</h3>
+<p>自分が作成したクライアント一覧を取得する。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "clients": [
+    {
+      "id": "uuid",
+      "client_id": "e35a945b",
+      "name": "My App",
+      "client_type": "public",
+      "redirect_uris": ["http://localhost:3000/callback"],
+      "allowed_grant_types": ["authorization_code"],
+      "is_active": true,
+      "created_by": "member-uuid",
+      "created_at": "..."
+    }
+  ],
+  "total": 1
+}</code></pre>
+
+<h3><span class="method method-post">POST</span> /oauth/me/clients</h3>
+<p>新しいOAuthクライアントを作成する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  "name": "My App",
+  "client_type": "public",
+  "redirect_uris": ["http://localhost:3000/callback"],
+  "allowed_grant_types": ["authorization_code"],
+  "description": "optional description"
+}</code></pre>
+<p><strong>成功レスポンス (201):</strong></p>
+<pre><code class="language-json">{
+  "client": { ... },
+  "client_secret": "shown-only-once (confidential type only)"
+}</code></pre>
+<p><code>client_id</code> は自動生成。<code>client_secret</code> は confidential タイプのみ、このレスポンスでのみ平文表示。</p>
+
+<h3><span class="method method-put">PUT</span> /oauth/me/clients/{id}</h3>
+<p>自分のクライアントを更新する。</p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  "name": "Updated Name",
+  "redirect_uris": ["http://new-uri/callback"]
+}</code></pre>
+
+<h3><span class="method method-delete">DELETE</span> /oauth/me/clients/{id}</h3>
+<p>自分のクライアントを削除する（論理削除）。他メンバーのクライアントは 403。</p>
+
+<hr />
+<h2>共通エラーフォーマット</h2>
+<p>OAuth エンドポイント以外の API エラー:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;not_found&quot;,
+    &quot;message&quot;: &quot;Resource not found&quot;
+  }
+}
+</code></pre>
+<h2>共通ヘッダー</h2>
+<p><strong>リクエスト:</strong></p>
+<table>
+<thead>
+<tr>
+<th>ヘッダー</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Content-Type</td>
+<td><code>application/json</code> (管理API) / <code>application/x-www-form-urlencoded</code> (OAuth)</td>
+</tr>
+<tr>
+<td>Authorization</td>
+<td><code>Bearer {token}</code> (保護エンドポイント)</td>
+</tr>
+<tr>
+<td>X-Request-ID</td>
+<td>リクエスト追跡用（任意）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>レスポンス:</strong></p>
+<table>
+<thead>
+<tr>
+<th>ヘッダー</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>X-Request-ID</td>
+<td>リクエスト追跡用（エコーバック）</td>
+</tr>
+<tr>
+<td>X-RateLimit-Limit</td>
+<td>Rate Limit 上限</td>
+</tr>
+<tr>
+<td>X-RateLimit-Remaining</td>
+<td>残りリクエスト数</td>
+</tr>
+<tr>
+<td>X-RateLimit-Reset</td>
+<td>リセット時刻（Unix timestamp）</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

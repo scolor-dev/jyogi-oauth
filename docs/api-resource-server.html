@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>リソースサーバー API 設計</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>リソースサーバー API 設計</h1>
+<h2>ベース URL</h2>
+<pre><code>http://127.0.0.1:8081
+Nginx 経由: https://oauth.example.internal/api/*
+</code></pre>
+<hr />
+<h2>認証・認可（共通）</h2>
+<p>すべての保護エンドポイントで以下を適用する。</p>
+<h3>認証方式</h3>
+<pre><code>Authorization: Bearer {access_token}
+</code></pre>
+<h3>認可フロー（ミドルウェア）</h3>
+<pre><code>1. Authorization ヘッダーから Bearer トークン抽出
+2. JWT 署名検証（JWKS 公開鍵）
+3. トークン有効期限チェック (exp, TTL: 15分)
+4. スコープチェック（エンドポイントごとの要求スコープと照合）
+5. リクエストコンテキストに member_id, client_id, scopes を格納
+</code></pre>
+<p>※ Redis 参照なし。JWT の署名と exp のみで検証完結。
+失効制御はリフレッシュトークン側で行い、JWT は最大15分で自然失効する。</p>
+<h3>JWKS キャッシュ戦略</h3>
+<pre><code>- 起動時に認可サーバーの /oauth/jwks から公開鍵を取得
+- メモリにキャッシュ（TTL: 1時間）
+- 検証失敗時にキャッシュを更新（鍵ローテーション対応）
+- 認可サーバーに到達できない場合はキャッシュで継続
+</code></pre>
+<h3>共通エラーレスポンス</h3>
+<p><strong>401 Unauthorized（トークンなし / 無効）:</strong></p>
+<pre><code>HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm=&quot;jyogi-oauth&quot;
+
+{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;unauthorized&quot;,
+    &quot;message&quot;: &quot;Invalid or expired access token&quot;
+  }
+}
+</code></pre>
+<p><strong>403 Forbidden（スコープ不足）:</strong></p>
+<pre><code class="language-json">HTTP/1.1 403 Forbidden
+
+{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;insufficient_scope&quot;,
+    &quot;message&quot;: &quot;Required scope: admin&quot;
+  }
+}
+</code></pre>
+<p><strong>429 Too Many Requests:</strong></p>
+<pre><code class="language-json">HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+
+{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;rate_limit_exceeded&quot;,
+    &quot;message&quot;: &quot;Too many requests. Retry after 30 seconds&quot;
+  }
+}
+</code></pre>
+<hr />
+<h2>ヘルスチェック</h2>
+<h3>GET /api/health</h3>
+<p>認証不要。監視・ロードバランサー用。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">HTTP/1.1 200 OK
+
+{
+  &quot;status&quot;: &quot;healthy&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;uptime_seconds&quot;: 86400,
+  &quot;dependencies&quot;: {
+    &quot;postgresql&quot;: &quot;connected&quot;,
+    &quot;auth_server&quot;: &quot;reachable&quot;
+  }
+}
+</code></pre>
+<p><strong>異常時:</strong></p>
+<pre><code class="language-json">HTTP/1.1 503 Service Unavailable
+
+{
+  &quot;status&quot;: &quot;unhealthy&quot;,
+  &quot;dependencies&quot;: {
+    &quot;postgresql&quot;: &quot;disconnected&quot;,
+    &quot;auth_server&quot;: &quot;unreachable&quot;
+  }
+}
+</code></pre>
+<hr />
+<h2>メンバー Identity API</h2>
+<p>メンバーの基本識別情報（表示名、アイコン、テーマカラー、タグライン）の取得・更新。
+クライアントシステムから最も高頻度でアクセスされるエンドポイント。</p>
+<h3>GET /api/v1/members/me/identity</h3>
+<p>自分自身の Identity を取得する。</p>
+<p><strong>必要スコープ:</strong> <code>identity</code></p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;display_name&quot;: &quot;田中 太郎&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;theme_color&quot;: &quot;#4A90D9&quot;,
+  &quot;tagline&quot;: &quot;部長&quot;,
+  &quot;updated_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
+}
+</code></pre>
+<p><strong>404 Not Found（Identity 未作成）:</strong></p>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;identity_not_found&quot;,
+    &quot;message&quot;: &quot;Identity has not been created yet&quot;
+  }
+}
+</code></pre>
+<h3>PUT /api/v1/members/me/identity</h3>
+<p>自分自身の Identity を作成・更新する（Upsert）。</p>
+<p><strong>必要スコープ:</strong> <code>identity:write</code> or <code>write</code></p>
+<p><strong>リクエストボディ:</strong></p>
+<pre><code class="language-json">{
+  &quot;display_name&quot;: &quot;田中 太郎&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;theme_color&quot;: &quot;#4A90D9&quot;,
+  &quot;tagline&quot;: &quot;部長&quot;
+}
+</code></pre>
+<p><strong>バリデーション:</strong></p>
+<table>
+<thead>
+<tr>
+<th>フィールド</th>
+<th>ルール</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>display_name</td>
+<td>必須、1〜100文字</td>
+</tr>
+<tr>
+<td>avatar_url</td>
+<td>任意、URL 形式、最大2048文字</td>
+</tr>
+<tr>
+<td>theme_color</td>
+<td>必須、HEX カラーコード（<code>#</code> + 6文字、例: <code>#FF5733</code>）</td>
+</tr>
+<tr>
+<td>tagline</td>
+<td>任意、1〜8文字（二つ名・肩書き。例: 部長、OB、Rust好き）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス（作成）:</strong></p>
+<pre><code class="language-json">HTTP/1.1 201 Created
+
+{
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;display_name&quot;: &quot;田中 太郎&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;theme_color&quot;: &quot;#4A90D9&quot;,
+  &quot;tagline&quot;: &quot;部長&quot;,
+  &quot;updated_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
+}
+</code></pre>
+<p><strong>成功レスポンス（更新）:</strong></p>
+<pre><code class="language-json">HTTP/1.1 200 OK
+
+{
+  &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;display_name&quot;: &quot;田中 太郎（更新）&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;theme_color&quot;: &quot;#FF5733&quot;,
+  &quot;tagline&quot;: &quot;元部長&quot;,
+  &quot;updated_at&quot;: &quot;2026-06-24T10:00:00Z&quot;
+}
+</code></pre>
+<h3>GET /api/v1/members/{member_id}/identity</h3>
+<p>指定メンバーの Identity を取得する。他メンバーの表示名やアイコンの取得に使用。</p>
+<p><strong>必要スコープ:</strong> <code>identity</code></p>
+<p><strong>パスパラメータ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>Yes</td>
+<td>対象メンバーの UUID</td>
+</tr>
+</tbody>
+</table>
+<p><strong>成功レスポンス:</strong> <code>GET /me/identity</code> と同一形式</p>
+<h3>GET /api/v1/members/identities</h3>
+<p>複数メンバーの Identity を一括取得する。チャットのメンバーリスト等で使用。</p>
+<p><strong>必要スコープ:</strong> <code>identity</code></p>
+<p><strong>クエリパラメータ:</strong></p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ids</td>
+<td>Yes</td>
+<td>カンマ区切りの member_id（最大50件）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>リクエスト例:</strong></p>
+<pre><code>GET /api/v1/members/identities?ids=uuid-1,uuid-2,uuid-3
+</code></pre>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;member_id&quot;: &quot;uuid-1&quot;,
+      &quot;display_name&quot;: &quot;田中 太郎&quot;,
+      &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/uuid-1.png&quot;,
+      &quot;theme_color&quot;: &quot;#4A90D9&quot;,
+      &quot;tagline&quot;: &quot;部長&quot;
+    },
+    {
+      &quot;member_id&quot;: &quot;uuid-2&quot;,
+      &quot;display_name&quot;: &quot;鈴木 花子&quot;,
+      &quot;avatar_url&quot;: null,
+      &quot;theme_color&quot;: &quot;#E74C3C&quot;,
+      &quot;tagline&quot;: null
+    }
+  ]
+}
+</code></pre>
+<p>※ 存在しない member_id は結果に含まない（エラーにしない）</p>
+<hr />
+<h2>共通レスポンスフォーマット</h2>
+<h3>成功（単一リソース）</h3>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;...&quot;,
+  &quot;field&quot;: &quot;value&quot;
+}
+</code></pre>
+<h3>成功（一覧）</h3>
+<pre><code class="language-json">{
+  &quot;data&quot;: [...],
+  &quot;pagination&quot;: {
+    &quot;total&quot;: 100,
+    &quot;page&quot;: 1,
+    &quot;per_page&quot;: 20,
+    &quot;total_pages&quot;: 5
+  }
+}
+</code></pre>
+<h3>エラー</h3>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;error_code&quot;,
+    &quot;message&quot;: &quot;Human-readable message&quot;,
+    &quot;details&quot;: {}
+  }
+}
+</code></pre>
+<h3>HTTPステータスコード</h3>
+<table>
+<thead>
+<tr>
+<th>コード</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>200</td>
+<td>取得・更新成功</td>
+</tr>
+<tr>
+<td>201</td>
+<td>作成成功</td>
+</tr>
+<tr>
+<td>204</td>
+<td>削除成功</td>
+</tr>
+<tr>
+<td>400</td>
+<td>バリデーションエラー</td>
+</tr>
+<tr>
+<td>401</td>
+<td>認証エラー</td>
+</tr>
+<tr>
+<td>403</td>
+<td>認可エラー（スコープ不足）</td>
+</tr>
+<tr>
+<td>404</td>
+<td>リソースが見つからない</td>
+</tr>
+<tr>
+<td>409</td>
+<td>競合（重複など）</td>
+</tr>
+<tr>
+<td>429</td>
+<td>Rate Limit 超過</td>
+</tr>
+<tr>
+<td>500</td>
+<td>サーバーエラー</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>共通ヘッダー</h2>
+<p><strong>レスポンス:</strong></p>
+<table>
+<thead>
+<tr>
+<th>ヘッダー</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>X-Request-ID</td>
+<td>リクエスト追跡用</td>
+</tr>
+<tr>
+<td>X-RateLimit-Limit</td>
+<td>Rate Limit 上限</td>
+</tr>
+<tr>
+<td>X-RateLimit-Remaining</td>
+<td>残りリクエスト数</td>
+</tr>
+<tr>
+<td>X-RateLimit-Reset</td>
+<td>リセット時刻（Unix timestamp）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Rate Limit</h2>
+<table>
+<thead>
+<tr>
+<th>対象</th>
+<th>上限</th>
+<th>ウィンドウ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>認証済みメンバー</td>
+<td>100 req</td>
+<td>60秒</td>
+</tr>
+<tr>
+<td>クライアント単位</td>
+<td>1000 req</td>
+<td>60秒</td>
+</tr>
+</tbody>
+</table>
+<p>カウンタは Redis に保持。</p>
+</body>
+</html>

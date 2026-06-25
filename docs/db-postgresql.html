@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PostgreSQL データ設計</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>PostgreSQL データ設計</h1>
+<h2>接続情報</h2>
+<pre><code>Host: 127.0.0.1
+Port: 5432
+Database: jyogi_oauth
+</code></pre>
+<h2>スキーマ分離</h2>
+<table>
+<thead>
+<tr>
+<th>スキーマ</th>
+<th>用途</th>
+<th>アクセス元</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auth</code></td>
+<td>認可サーバー用（メンバー認証、クライアント、スコープ、同意）</td>
+<td>Go 認可サーバー</td>
+</tr>
+<tr>
+<td><code>resource</code></td>
+<td>リソースサーバー用（プロフィール、業務データ）</td>
+<td>Rust リソースサーバー</td>
+</tr>
+</tbody>
+</table>
+<p>将来の DB 分離時にスキーマ単位で移行可能。</p>
+<hr />
+<h2>auth スキーマ（認可サーバー用）</h2>
+<h3>auth.members</h3>
+<p>メンバー情報。認証・認可の主体。</p>
+<pre><code class="language-sql">CREATE TABLE auth.members (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username      VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    role          VARCHAR(50)  NOT NULL DEFAULT 'member',
+    is_active     BOOLEAN      NOT NULL DEFAULT true,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_role CHECK (role IN ('member', 'moderator', 'admin'))
+);
+
+CREATE INDEX idx_members_username  ON auth.members (username);
+CREATE INDEX idx_members_email     ON auth.members (email);
+CREATE INDEX idx_members_is_active ON auth.members (is_active);
+CREATE INDEX idx_members_role      ON auth.members (role);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>制約</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>PK</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>username</td>
+<td>VARCHAR(255)</td>
+<td>UNIQUE, NOT NULL</td>
+<td>ログイン用ユーザー名</td>
+</tr>
+<tr>
+<td>password_hash</td>
+<td>VARCHAR(255)</td>
+<td>NOT NULL</td>
+<td>argon2id ハッシュ</td>
+</tr>
+<tr>
+<td>email</td>
+<td>VARCHAR(255)</td>
+<td>UNIQUE, NOT NULL</td>
+<td>メールアドレス</td>
+</tr>
+<tr>
+<td>role</td>
+<td>VARCHAR(50)</td>
+<td>NOT NULL, DEFAULT 'member'</td>
+<td>ロール（member / moderator / admin）</td>
+</tr>
+<tr>
+<td>is_active</td>
+<td>BOOLEAN</td>
+<td>NOT NULL, DEFAULT true</td>
+<td>有効/無効</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>作成日時</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>更新日時</td>
+</tr>
+</tbody>
+</table>
+<p>※ 表示名（display_name）は <code>resource.member_identities</code> に持たせる。
+auth スキーマは認証に必要な最小限の情報のみ保持する。</p>
+<hr />
+<h3>auth.clients</h3>
+<p>OAuth クライアント。認可を要求するアプリケーション。</p>
+<pre><code class="language-sql">CREATE TABLE auth.clients (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id          VARCHAR(255) NOT NULL UNIQUE,
+    client_secret_hash VARCHAR(255),
+    name               VARCHAR(255) NOT NULL,
+    description        TEXT,
+    client_type        VARCHAR(50) NOT NULL DEFAULT 'confidential',
+    redirect_uris      TEXT[] NOT NULL,
+    allowed_grant_types TEXT[] NOT NULL DEFAULT '{authorization_code}',
+    is_active          BOOLEAN NOT NULL DEFAULT true,
+    created_by         UUID REFERENCES auth.members(id),
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_client_type CHECK (client_type IN ('confidential', 'public'))
+);
+
+CREATE INDEX idx_clients_client_id ON auth.clients (client_id);
+CREATE INDEX idx_clients_is_active ON auth.clients (is_active);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>制約</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>PK</td>
+<td>内部 ID</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>VARCHAR(255)</td>
+<td>UNIQUE, NOT NULL</td>
+<td>OAuth クライアント ID（外部公開）</td>
+</tr>
+<tr>
+<td>client_secret_hash</td>
+<td>VARCHAR(255)</td>
+<td></td>
+<td>シークレットのハッシュ（public の場合 NULL）</td>
+</tr>
+<tr>
+<td>name</td>
+<td>VARCHAR(255)</td>
+<td>NOT NULL</td>
+<td>アプリケーション名</td>
+</tr>
+<tr>
+<td>description</td>
+<td>TEXT</td>
+<td></td>
+<td>アプリケーション説明</td>
+</tr>
+<tr>
+<td>client_type</td>
+<td>VARCHAR(50)</td>
+<td>NOT NULL</td>
+<td><code>confidential</code> or <code>public</code></td>
+</tr>
+<tr>
+<td>redirect_uris</td>
+<td>TEXT[]</td>
+<td>NOT NULL</td>
+<td>許可されたリダイレクト URI 一覧</td>
+</tr>
+<tr>
+<td>allowed_grant_types</td>
+<td>TEXT[]</td>
+<td>NOT NULL</td>
+<td>許可された grant type 一覧</td>
+</tr>
+<tr>
+<td>is_active</td>
+<td>BOOLEAN</td>
+<td>NOT NULL</td>
+<td>有効/無効</td>
+</tr>
+<tr>
+<td>created_by</td>
+<td>UUID</td>
+<td>FK → members</td>
+<td>登録者</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>作成日時</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>更新日時</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3>auth.scopes</h3>
+<p>スコープ定義。リソースへのアクセス権限の単位。</p>
+<pre><code class="language-sql">CREATE TABLE auth.scopes (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    is_default  BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_scopes_name ON auth.scopes (name);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>制約</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>PK</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>name</td>
+<td>VARCHAR(100)</td>
+<td>UNIQUE, NOT NULL</td>
+<td>スコープ名</td>
+</tr>
+<tr>
+<td>description</td>
+<td>TEXT</td>
+<td></td>
+<td>スコープの説明</td>
+</tr>
+<tr>
+<td>is_default</td>
+<td>BOOLEAN</td>
+<td>NOT NULL</td>
+<td>デフォルトで付与するか</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>作成日時</td>
+</tr>
+</tbody>
+</table>
+<p><strong>初期データ:</strong></p>
+<pre><code class="language-sql">INSERT INTO auth.scopes (name, description, is_default) VALUES
+    ('read',             'リソースの読み取り', true),
+    ('write',            'リソースの書き込み', false),
+    ('admin',            '管理者権限', false),
+    ('identity',         'メンバーの基本識別情報の読み取り（表示名、アイコン、カラー、タグライン）', true),
+    ('identity:write',   'メンバーの基本識別情報の更新', false),
+    ('profile',          'メンバーの詳細プロフィールの読み取り（予定）', false);
+</code></pre>
+<hr />
+<h3>auth.client_scopes</h3>
+<p>クライアントに許可されたスコープ（多対多）。</p>
+<pre><code class="language-sql">CREATE TABLE auth.client_scopes (
+    client_id UUID NOT NULL REFERENCES auth.clients(id) ON DELETE CASCADE,
+    scope_id  UUID NOT NULL REFERENCES auth.scopes(id) ON DELETE CASCADE,
+    PRIMARY KEY (client_id, scope_id)
+);
+</code></pre>
+<hr />
+<h3>auth.consent_records</h3>
+<p>メンバーが同意したクライアント×スコープの記録。
+再同意を省略するために使用。</p>
+<pre><code class="language-sql">CREATE TABLE auth.consent_records (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    member_id  UUID NOT NULL REFERENCES auth.members(id) ON DELETE CASCADE,
+    client_id  UUID NOT NULL REFERENCES auth.clients(id) ON DELETE CASCADE,
+    scopes     TEXT[] NOT NULL,
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ,
+
+    CONSTRAINT uq_consent_member_client UNIQUE (member_id, client_id)
+);
+
+CREATE INDEX idx_consent_member_id ON auth.consent_records (member_id);
+CREATE INDEX idx_consent_client_id ON auth.consent_records (client_id);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>制約</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>PK</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>UUID</td>
+<td>FK → members, NOT NULL</td>
+<td>同意したメンバー</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>UUID</td>
+<td>FK → clients, NOT NULL</td>
+<td>同意先クライアント</td>
+</tr>
+<tr>
+<td>scopes</td>
+<td>TEXT[]</td>
+<td>NOT NULL</td>
+<td>同意したスコープ一覧</td>
+</tr>
+<tr>
+<td>granted_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>同意日時</td>
+</tr>
+<tr>
+<td>revoked_at</td>
+<td>TIMESTAMPTZ</td>
+<td></td>
+<td>同意撤回日時（NULL = 有効）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3>auth.audit_logs</h3>
+<p>認可サーバーの操作ログ。セキュリティ監査用。</p>
+<pre><code class="language-sql">CREATE TABLE auth.audit_logs (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    member_id  UUID REFERENCES auth.members(id),
+    client_id  VARCHAR(255),
+    action     VARCHAR(100) NOT NULL,
+    ip_address INET,
+    user_agent TEXT,
+    details    JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_audit_member_id ON auth.audit_logs (member_id);
+CREATE INDEX idx_audit_action ON auth.audit_logs (action);
+CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>UUID</td>
+<td>操作メンバー（未認証の場合 NULL）</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>VARCHAR(255)</td>
+<td>関連クライアント ID</td>
+</tr>
+<tr>
+<td>action</td>
+<td>VARCHAR(100)</td>
+<td>操作種別</td>
+</tr>
+<tr>
+<td>ip_address</td>
+<td>INET</td>
+<td>接続元 IP</td>
+</tr>
+<tr>
+<td>user_agent</td>
+<td>TEXT</td>
+<td>User-Agent</td>
+</tr>
+<tr>
+<td>details</td>
+<td>JSONB</td>
+<td>追加情報（自由形式）</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>発生日時</td>
+</tr>
+</tbody>
+</table>
+<p><strong>action の例:</strong></p>
+<table>
+<thead>
+<tr>
+<th>action</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>login_success</code></td>
+<td>ログイン成功</td>
+</tr>
+<tr>
+<td><code>login_failure</code></td>
+<td>ログイン失敗</td>
+</tr>
+<tr>
+<td><code>consent_granted</code></td>
+<td>同意付与</td>
+</tr>
+<tr>
+<td><code>consent_revoked</code></td>
+<td>同意撤回</td>
+</tr>
+<tr>
+<td><code>token_issued</code></td>
+<td>トークン発行</td>
+</tr>
+<tr>
+<td><code>token_revoked</code></td>
+<td>トークン失効</td>
+</tr>
+<tr>
+<td><code>client_created</code></td>
+<td>クライアント作成</td>
+</tr>
+<tr>
+<td><code>client_updated</code></td>
+<td>クライアント更新</td>
+</tr>
+<tr>
+<td><code>client_deleted</code></td>
+<td>クライアント削除</td>
+</tr>
+<tr>
+<td><code>member_created</code></td>
+<td>メンバー作成</td>
+</tr>
+<tr>
+<td><code>member_updated</code></td>
+<td>メンバー更新</td>
+</tr>
+<tr>
+<td><code>member_deactivated</code></td>
+<td>メンバー無効化</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3>auth.signing_keys</h3>
+<p>JWT 署名鍵の管理。鍵ローテーションに対応。</p>
+<pre><code class="language-sql">CREATE TABLE auth.signing_keys (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kid         VARCHAR(100) NOT NULL UNIQUE,
+    algorithm   VARCHAR(10) NOT NULL DEFAULT 'ES256',
+    public_key  TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    is_active   BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ,
+
+    CONSTRAINT chk_algorithm CHECK (algorithm IN ('ES256', 'RS256'))
+);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>kid</td>
+<td>VARCHAR(100)</td>
+<td>Key ID（JWT ヘッダーの kid に対応）</td>
+</tr>
+<tr>
+<td>algorithm</td>
+<td>VARCHAR(10)</td>
+<td>署名アルゴリズム（デフォルト: ES256）</td>
+</tr>
+<tr>
+<td>public_key</td>
+<td>TEXT</td>
+<td>PEM 形式の公開鍵</td>
+</tr>
+<tr>
+<td>private_key</td>
+<td>TEXT</td>
+<td>PEM 形式の秘密鍵（暗号化して保存）</td>
+</tr>
+<tr>
+<td>is_active</td>
+<td>BOOLEAN</td>
+<td>現在使用中か</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>作成日時</td>
+</tr>
+<tr>
+<td>expires_at</td>
+<td>TIMESTAMPTZ</td>
+<td>有効期限</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>resource スキーマ（リソースサーバー用）</h2>
+<h3>resource.member_identities</h3>
+<p>メンバーの基本識別情報。クライアントシステムから高頻度でアクセスされる。
+表示名・アイコン・テーマカラー・タグラインの最小構成。</p>
+<pre><code class="language-sql">CREATE TABLE resource.member_identities (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    member_id    UUID NOT NULL UNIQUE,
+    display_name VARCHAR(100) NOT NULL,
+    avatar_url   TEXT,
+    theme_color  VARCHAR(7) NOT NULL DEFAULT '#000000',
+    tagline      VARCHAR(8),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_member_identities_member_id ON resource.member_identities (member_id);
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>カラム</th>
+<th>型</th>
+<th>制約</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td>UUID</td>
+<td>PK</td>
+<td>主キー</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>UUID</td>
+<td>UNIQUE, NOT NULL</td>
+<td>auth.members.id を参照（FK 制約なし）</td>
+</tr>
+<tr>
+<td>display_name</td>
+<td>VARCHAR(100)</td>
+<td>NOT NULL</td>
+<td>表示名</td>
+</tr>
+<tr>
+<td>avatar_url</td>
+<td>TEXT</td>
+<td></td>
+<td>アイコン画像の URL</td>
+</tr>
+<tr>
+<td>theme_color</td>
+<td>VARCHAR(7)</td>
+<td>NOT NULL, DEFAULT '#000000'</td>
+<td>テーマカラー（HEXコード）</td>
+</tr>
+<tr>
+<td>tagline</td>
+<td>VARCHAR(8)</td>
+<td></td>
+<td>二つ名・肩書き（例: 部長、OB、Rust好き）</td>
+</tr>
+<tr>
+<td>created_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>作成日時</td>
+</tr>
+<tr>
+<td>updated_at</td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td>更新日時</td>
+</tr>
+</tbody>
+</table>
+<p>※ <code>member_id</code> は FK 制約を張らない（スキーマ分離・将来の DB 分離を考慮）。
+アプリケーション層で整合性を担保する。</p>
+<h3>resource.member_profiles（予定）</h3>
+<p>メンバーの詳細プロフィール。MVP 後に実装予定。</p>
+<pre><code>想定カラム: 誕生日、学年、学歴、学部/学科、入部年度、SNSリンク、スキル等
+</code></pre>
+<hr />
+<h2>ER 図</h2>
+<pre><code>auth スキーマ:
+
+  ┌───────────┐       ┌───────────────┐       ┌──────────┐
+  │  members  │       │ consent_records│       │  scopes  │
+  │───────────│       │───────────────│       │──────────│
+  │ id (PK)   │◄──┐   │ id (PK)       │   ┌──►│ id (PK)  │
+  │ username  │   │   │ member_id(FK) │───┘   │ name     │
+  │ password  │   │   │ client_id(FK) │───┐   │ is_default│
+  │ email     │   │   │ scopes        │   │   └──────────┘
+  │ is_active │   │   │ granted_at    │   │        ▲
+  └───────────┘   │   └───────────────┘   │        │
+       ▲          │                       │   ┌────┴───────┐
+       │          │   ┌──────────┐        │   │client_scopes│
+       │          │   │ clients  │        │   │────────────│
+       │          │   │──────────│        │   │client_id(FK)│
+       │          └───│created_by│◄───────┘   │scope_id(FK)│
+       │              │ id (PK)  │◄───────────┤            │
+       │              │client_id │            └────────────┘
+       │              │ name     │
+       │              │ type     │
+       │              │redirects │
+       │              └──────────┘
+       │                   ▲
+       │                   │
+       │           ┌───────┴──────┐
+       │           │  audit_logs  │
+       │           │──────────────│
+       │           │ id (PK)      │
+       │           │ member_id(FK)│
+       │           │ client_id    │
+       │           │ action       │
+       │           └──────────────┘
+       │
+       │          ┌──────────────┐
+       │          │ signing_keys │
+       │          │──────────────│
+       │          │ id (PK)      │
+       │          │ kid          │
+       │          │ public_key   │
+       │          │ private_key  │
+       │          └──────────────┘
+
+
+resource スキーマ:
+
+  ┌──────────────────────┐
+  │  member_identities   │
+  │──────────────────────│
+  │ id (PK)              │
+  │ member_id (UNIQUE)   │ ← auth.members.id を参照（FK なし）
+  │ display_name         │
+  │ avatar_url           │
+  │ theme_color          │
+  │ tagline              │
+  └──────────────────────┘
+
+  ┌──────────────────────┐
+  │  member_profiles     │ ← 予定
+  │──────────────────────│
+  │ member_id            │
+  │ birthday, grade, ... │
+  └──────────────────────┘
+</code></pre>
+<hr />
+<h2>マイグレーション</h2>
+<p>開発段階では単一ファイルに統合。<code>docker compose down -v && docker compose up -d</code> でDB初期化。</p>
+<pre><code>migrations/
+└── 001_init.sql   # 全スキーマ・テーブル・ロール・シードデータ
+</code></pre>
+
+<h3>シードデータ</h3>
+<p>スコープ初期データ（6件）と root 管理者メンバーが自動作成される。</p>
+<table>
+<thead><tr><th>データ</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>スコープ</td><td>read, write, admin, identity, identity:write, profile</td></tr>
+<tr><td>root メンバー</td><td>username: <code>root</code> / password: <code>65536</code> / role: <code>admin</code></td></tr>
+</tbody>
+</table>
+<hr />
+<h2>トリガー</h2>
+<h3>updated_at 自動更新</h3>
+<pre><code class="language-sql">CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_members_updated_at
+    BEFORE UPDATE ON auth.members
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trg_clients_updated_at
+    BEFORE UPDATE ON auth.clients
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trg_member_identities_updated_at
+    BEFORE UPDATE ON resource.member_identities
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+</code></pre>
+<hr />
+<h2>DB ユーザー（ロール）</h2>
+<pre><code class="language-sql">-- 認可サーバー用（Go）
+CREATE ROLE jyogi_auth WITH LOGIN PASSWORD 'xxx';
+GRANT USAGE ON SCHEMA auth TO jyogi_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA auth TO jyogi_auth;
+
+-- リソースサーバー用（Rust）
+CREATE ROLE jyogi_resource WITH LOGIN PASSWORD 'xxx';
+GRANT USAGE ON SCHEMA resource TO jyogi_resource;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA resource TO jyogi_resource;
+GRANT USAGE ON SCHEMA auth TO jyogi_resource;
+GRANT SELECT ON auth.members TO jyogi_resource;
+</code></pre>
+<p>リソースサーバーは <code>auth.members</code> を読み取り専用で参照可能（メンバー情報の表示用）。</p>
+</body>
+</html>

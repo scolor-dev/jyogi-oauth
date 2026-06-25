@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>セキュリティ設計</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>セキュリティ設計</h1>
+<h2>概要</h2>
+<p>部内 OAuth 基盤のセキュリティ方針。
+外部公開は Cloudflare Tunnel 経由で行い、HTTPS 終端は Cloudflare が担当する。</p>
+<hr />
+<h2>通信の暗号化</h2>
+<h3>構成</h3>
+<pre><code>クライアント →(HTTPS)→ Cloudflare →(Tunnel/暗号化)→ Nginx (:80 HTTP)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>区間</th>
+<th>プロトコル</th>
+<th>暗号化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>クライアント → Cloudflare</td>
+<td>HTTPS</td>
+<td>Cloudflare が TLS 終端</td>
+</tr>
+<tr>
+<td>Cloudflare → Nginx</td>
+<td>Cloudflare Tunnel</td>
+<td>トンネル内で暗号化</td>
+</tr>
+<tr>
+<td>Nginx → Go / Rust</td>
+<td>HTTP</td>
+<td>Docker 内部ネットワーク（外部非公開）</td>
+</tr>
+<tr>
+<td>Go / Rust → Redis / PostgreSQL</td>
+<td>TCP</td>
+<td>Docker 内部ネットワーク（外部非公開）</td>
+</tr>
+</tbody>
+</table>
+<h3>Nginx の設定</h3>
+<ul>
+<li>Nginx は <strong>HTTP (:80) のみ</strong> でリッスン</li>
+<li>証明書管理は不要（Cloudflare が担当）</li>
+<li>Cloudflare が付与するヘッダーを信頼する設定を追加</li>
+</ul>
+<pre><code class="language-nginx"># Cloudflare の実 IP を取得
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+real_ip_header CF-Connecting-IP;
+</code></pre>
+<hr />
+<h2>CORS（Cross-Origin Resource Sharing）</h2>
+<p>複数サブドメインおよび localhost からのリクエストを許可する。Nginx の <code>map</code> ディレクティブで動的にオリジンを判定。</p>
+<h3>設定方針</h3>
+<pre><code class="language-nginx"># nginx.conf (server ブロックの外)
+map $http_origin $cors_origin {
+    default "";
+    "~^https?://localhost(:[0-9]+)?$" $http_origin;
+    "~^https://([a-z0-9-]+\.)?example\.internal$" $http_origin;
+}
+
+# 各 location ブロック内
+if ($cors_origin != "") {
+    add_header Access-Control-Allow-Origin $cors_origin always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Request-ID" always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    add_header Access-Control-Max-Age "86400" always;
+}
+
+if ($request_method = OPTIONS) {
+    # プリフライトに同じヘッダーを付与して 204 返却
+    return 204;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>設定</th>
+<th>値</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Allow-Origin</td>
+<td><code>localhost:*</code> + <code>*.example.internal</code></td>
+<td>map ディレクティブで動的に許可</td>
+</tr>
+<tr>
+<td>Allow-Credentials</td>
+<td><code>true</code></td>
+<td>Cookie（セッション）の送信を許可</td>
+</tr>
+<tr>
+<td>Allow-Methods</td>
+<td>GET, POST, PUT, DELETE, OPTIONS</td>
+<td>許可する HTTP メソッド</td>
+</tr>
+<tr>
+<td>Allow-Headers</td>
+<td>Authorization, Content-Type, X-Request-ID</td>
+<td>許可するカスタムヘッダー</td>
+</tr>
+<tr>
+<td>Max-Age</td>
+<td>86400</td>
+<td>プリフライトキャッシュ（24時間）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>CSRF 対策</h2>
+<h3>OAuth エンドポイント</h3>
+<table>
+<thead>
+<tr>
+<th>エンドポイント</th>
+<th>対策</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/oauth/authorize</td>
+<td><code>state</code> パラメータで CSRF 防止（OAuth 2.0 仕様）</td>
+</tr>
+<tr>
+<td>/oauth/token</td>
+<td>クライアント認証（client_secret）で保護</td>
+</tr>
+<tr>
+<td>/oauth/login</td>
+<td>SameSite Cookie + Origin ヘッダー検証</td>
+</tr>
+<tr>
+<td>/oauth/consent</td>
+<td>セッション Cookie + CSRF トークン</td>
+</tr>
+</tbody>
+</table>
+<h3>セッション Cookie</h3>
+<pre><code>Set-Cookie: jyogi_sid={session_id};
+    HttpOnly;
+    Secure;
+    SameSite=Lax;
+    Path=/oauth;
+    Domain=.example.internal;
+    Max-Age=86400
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>属性</th>
+<th>値</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HttpOnly</td>
+<td>Yes</td>
+<td>JavaScript からアクセス不可（XSS 対策）</td>
+</tr>
+<tr>
+<td>Secure</td>
+<td>Yes</td>
+<td>HTTPS 経由でのみ送信（Cloudflare が HTTPS 終端）</td>
+</tr>
+<tr>
+<td>SameSite</td>
+<td>Lax</td>
+<td>同一サイトからのリクエストでのみ Cookie を送信</td>
+</tr>
+<tr>
+<td>Path</td>
+<td>/oauth</td>
+<td>認可サーバーのパスでのみ Cookie を送信</td>
+</tr>
+<tr>
+<td>Domain</td>
+<td>.example.internal</td>
+<td>サブドメイン間で共有</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>パスワードセキュリティ</h2>
+<h3>ハッシュ方式</h3>
+<p><strong>argon2id</strong> を使用する。</p>
+<table>
+<thead>
+<tr>
+<th>パラメータ</th>
+<th>値</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>algorithm</td>
+<td>argon2id</td>
+<td>Argon2 のハイブリッド版（側チャネル攻撃耐性 + GPU 耐性）</td>
+</tr>
+<tr>
+<td>memory</td>
+<td>65536 KB (64MB)</td>
+<td>メモリコスト</td>
+</tr>
+<tr>
+<td>iterations</td>
+<td>3</td>
+<td>反復回数</td>
+</tr>
+<tr>
+<td>parallelism</td>
+<td>2</td>
+<td>並列度</td>
+</tr>
+<tr>
+<td>salt_length</td>
+<td>16 bytes</td>
+<td>ランダムソルト長</td>
+</tr>
+<tr>
+<td>hash_length</td>
+<td>32 bytes</td>
+<td>出力ハッシュ長</td>
+</tr>
+</tbody>
+</table>
+<h3>保存形式</h3>
+<pre><code>$argon2id$v=19$m=65536,t=3,p=2$&lt;salt_base64&gt;$&lt;hash_base64&gt;
+</code></pre>
+<h3>パスワードポリシー</h3>
+<table>
+<thead>
+<tr>
+<th>ルール</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>最小長</td>
+<td>8文字</td>
+</tr>
+<tr>
+<td>最大長</td>
+<td>128文字</td>
+</tr>
+<tr>
+<td>必須文字</td>
+<td>英大文字・英小文字・数字のうち2種以上</td>
+</tr>
+<tr>
+<td>禁止</td>
+<td>ログインユーザー名と同一</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Rate Limit</h2>
+<h3>ブルートフォース対策</h3>
+<table>
+<thead>
+<tr>
+<th>対象</th>
+<th>上限</th>
+<th>ウィンドウ</th>
+<th>超過時</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ログイン試行（ユーザー名単位）</td>
+<td>5回</td>
+<td>5分</td>
+<td>一時ロック + 429</td>
+</tr>
+<tr>
+<td>/token エンドポイント（クライアント単位）</td>
+<td>20回</td>
+<td>60秒</td>
+<td>429</td>
+</tr>
+<tr>
+<td>未認証リクエスト（IP 単位）</td>
+<td>30回</td>
+<td>60秒</td>
+<td>429</td>
+</tr>
+<tr>
+<td>認証済みリクエスト（メンバー単位）</td>
+<td>100回</td>
+<td>60秒</td>
+<td>429</td>
+</tr>
+</tbody>
+</table>
+<h3>レスポンスヘッダー</h3>
+<pre><code>X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1719200060
+Retry-After: 30
+</code></pre>
+<hr />
+<h2>トークンセキュリティ</h2>
+<h3>アクセストークン（JWT）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>設計</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>形式</td>
+<td>JWT（ES256 署名）</td>
+</tr>
+<tr>
+<td>有効期間</td>
+<td>15分</td>
+</tr>
+<tr>
+<td>Redis 保存</td>
+<td>しない（自己完結型）</td>
+</tr>
+<tr>
+<td>失効方法</td>
+<td>自然失効のみ（最大15分待ち）</td>
+</tr>
+</tbody>
+</table>
+<h3>リフレッシュトークン</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>設計</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>形式</td>
+<td>ランダム文字列（64 bytes、Base64url エンコード）</td>
+</tr>
+<tr>
+<td>有効期間</td>
+<td>7日</td>
+</tr>
+<tr>
+<td>Redis 保存</td>
+<td>する（SHA-256 ハッシュをキーに保存）</td>
+</tr>
+<tr>
+<td>ローテーション</td>
+<td>使用のたびに新しいトークンを発行、旧トークンは削除</td>
+</tr>
+<tr>
+<td>再利用検知</td>
+<td>旧トークンが使用された場合、そのメンバーの全トークンを無効化</td>
+</tr>
+</tbody>
+</table>
+<h3>認可コード</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>設計</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>形式</td>
+<td>ランダム文字列（32 bytes、Base64url エンコード）</td>
+</tr>
+<tr>
+<td>有効期間</td>
+<td>10分</td>
+</tr>
+<tr>
+<td>使用回数</td>
+<td>1回限り（取得後即削除）</td>
+</tr>
+<tr>
+<td>PKCE</td>
+<td>必須（S256 のみ）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>入力バリデーション</h2>
+<h3>共通</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>対策</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SQL インジェクション</td>
+<td>プリペアドステートメント / パラメータバインディング</td>
+</tr>
+<tr>
+<td>XSS</td>
+<td>フロントは Vue の自動エスケープ。API は JSON レスポンスのみ</td>
+</tr>
+<tr>
+<td>redirect_uri</td>
+<td>完全一致で検証（部分一致やワイルドカード不可）</td>
+</tr>
+<tr>
+<td>scope</td>
+<td>登録済みスコープとの照合</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>UUID 形式の検証</td>
+</tr>
+<tr>
+<td>theme_color</td>
+<td>正規表現 <code>^#[0-9A-Fa-f]{6}$</code> で検証（Go・Rust 両方）</td>
+</tr>
+<tr>
+<td>display_name</td>
+<td>1〜100文字</td>
+</tr>
+<tr>
+<td>tagline</td>
+<td>任意、1〜8文字（Unicode対応）</td>
+</tr>
+</tbody>
+</table>
+<h3>redirect_uri の検証</h3>
+<pre><code>登録済み: https://app.example.internal/callback
+リクエスト: https://app.example.internal/callback  → OK
+リクエスト: https://app.example.internal/callback?  → NG
+リクエスト: https://evil.example.com/callback       → NG
+</code></pre>
+<hr />
+<h2>HTTP セキュリティヘッダー</h2>
+<p>Nginx で付与する。</p>
+<pre><code class="language-nginx">add_header X-Content-Type-Options &quot;nosniff&quot; always;
+add_header X-Frame-Options &quot;DENY&quot; always;
+add_header X-XSS-Protection &quot;0&quot; always;
+add_header Referrer-Policy &quot;strict-origin-when-cross-origin&quot; always;
+add_header Content-Security-Policy &quot;default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'&quot; always;
+add_header Permissions-Policy &quot;camera=(), microphone=(), geolocation=()&quot; always;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>ヘッダー</th>
+<th>値</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>X-Content-Type-Options</td>
+<td>nosniff</td>
+<td>MIME タイプスニッフィング防止</td>
+</tr>
+<tr>
+<td>X-Frame-Options</td>
+<td>DENY</td>
+<td>iframe での埋め込み禁止（クリックジャッキング対策）</td>
+</tr>
+<tr>
+<td>X-XSS-Protection</td>
+<td>0</td>
+<td>ブラウザの XSS フィルタ無効化（CSP に委任）</td>
+</tr>
+<tr>
+<td>Referrer-Policy</td>
+<td>strict-origin-when-cross-origin</td>
+<td>リファラ漏洩防止</td>
+</tr>
+<tr>
+<td>Content-Security-Policy</td>
+<td>default-src 'self'</td>
+<td>外部リソースの読み込み制限</td>
+</tr>
+<tr>
+<td>Permissions-Policy</td>
+<td>camera=(), microphone=()</td>
+<td>デバイスアクセス無効化</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>監査ログ</h2>
+<p>PostgreSQL の <code>auth.audit_logs</code> テーブルに記録する。</p>
+<h3>記録対象</h3>
+<table>
+<thead>
+<tr>
+<th>イベント</th>
+<th>ログレベル</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ログイン成功</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>ログイン失敗</td>
+<td>WARN</td>
+</tr>
+<tr>
+<td>同意付与/撤回</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>トークン発行</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>トークン失効</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>クライアント作成/更新/削除</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>メンバー作成/更新/無効化</td>
+<td>INFO</td>
+</tr>
+<tr>
+<td>Rate Limit 超過</td>
+<td>WARN</td>
+</tr>
+<tr>
+<td>不正なリフレッシュトークン再利用検知</td>
+<td>ERROR</td>
+</tr>
+</tbody>
+</table>
+<h3>ログに含める情報</h3>
+<pre><code class="language-json">{
+  &quot;action&quot;: &quot;login_success&quot;,
+  &quot;member_id&quot;: &quot;uuid&quot;,
+  &quot;client_id&quot;: &quot;my-app&quot;,
+  &quot;ip_address&quot;: &quot;192.168.1.100&quot;,
+  &quot;user_agent&quot;: &quot;Mozilla/5.0...&quot;,
+  &quot;timestamp&quot;: &quot;2026-06-24T09:00:00Z&quot;,
+  &quot;details&quot;: {}
+}
+</code></pre>
+<hr />
+<h2>Docker ネットワークセキュリティ</h2>
+<h3>ポート公開</h3>
+<table>
+<thead>
+<tr>
+<th>コンテナ</th>
+<th>外部公開</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>nginx</td>
+<td>:80 のみ</td>
+<td>Cloudflare Tunnel 経由でアクセス</td>
+</tr>
+<tr>
+<td>auth-server</td>
+<td>非公開 (expose のみ)</td>
+<td>Nginx からの内部通信のみ</td>
+</tr>
+<tr>
+<td>resource-server</td>
+<td>非公開 (expose のみ)</td>
+<td>Nginx からの内部通信のみ</td>
+</tr>
+<tr>
+<td>redis</td>
+<td>非公開</td>
+<td>Docker 内部ネットワークのみ</td>
+</tr>
+<tr>
+<td>postgres</td>
+<td>非公開</td>
+<td>Docker 内部ネットワークのみ</td>
+</tr>
+</tbody>
+</table>
+<h3>ネットワーク分離</h3>
+<pre><code class="language-yaml">networks:
+  frontend:
+    # nginx, auth-server, resource-server
+  backend:
+    # auth-server, resource-server, redis, postgres
+</code></pre>
+<p>nginx は backend に直接アクセスできない。auth-server / resource-server が中継する。</p>
+</body>
+</html>

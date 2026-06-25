@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JWT クレーム定義</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="index.html">Index</a></li>
+<li><a href="architecture.html">設計書</a></li>
+<li><a href="api-auth-server.html">認可サーバー API</a></li>
+<li><a href="api-resource-server.html">リソースサーバー API</a></li>
+<li><a href="db-postgresql.html">PostgreSQL</a></li>
+<li><a href="db-redis.html">Redis</a></li>
+<li><a href="env-variables.html">環境変数</a></li>
+<li><a href="jwt-claims.html">JWT</a></li>
+<li><a href="security.html">セキュリティ</a></li>
+</ul>
+</nav>
+<h1>JWT クレーム定義</h1>
+<h2>概要</h2>
+<p>アクセストークンは JWT（JSON Web Token）として発行する。
+署名アルゴリズムは <strong>ES256</strong>（ECDSA P-256）。</p>
+<p>リソースサーバーは JWT の署名と exp のみで検証を完結する（Redis 参照なし）。</p>
+<hr />
+<h2>JWT ヘッダー</h2>
+<pre><code class="language-json">{
+  &quot;alg&quot;: &quot;ES256&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;,
+  &quot;kid&quot;: &quot;key-1&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>フィールド</th>
+<th>値</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>alg</td>
+<td><code>ES256</code></td>
+<td>署名アルゴリズム（ECDSA P-256 + SHA-256）</td>
+</tr>
+<tr>
+<td>typ</td>
+<td><code>JWT</code></td>
+<td>トークン種別</td>
+</tr>
+<tr>
+<td>kid</td>
+<td><code>key-1</code></td>
+<td>鍵 ID。JWKS エンドポイントの鍵と対応。鍵ローテーション時に変更</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>JWT ペイロード（クレーム）</h2>
+<h3>アクセストークン</h3>
+<pre><code class="language-json">{
+  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;,
+  &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;aud&quot;: &quot;https://oauth.example.internal/api&quot;,
+  &quot;exp&quot;: 1719197300,
+  &quot;iat&quot;: 1719196400,
+  &quot;jti&quot;: &quot;a1b2c3d4-e5f6-7890-abcd-ef1234567890&quot;,
+  &quot;client_id&quot;: &quot;my-app&quot;,
+  &quot;scope&quot;: &quot;read write&quot;,
+  &quot;username&quot;: &quot;tanaka&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>クレーム</th>
+<th>型</th>
+<th>必須</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iss</td>
+<td>string</td>
+<td>Yes</td>
+<td>発行者（認可サーバーの URL）</td>
+</tr>
+<tr>
+<td>sub</td>
+<td>string (UUID)</td>
+<td>Yes</td>
+<td>メンバー ID（auth.members.id）</td>
+</tr>
+<tr>
+<td>aud</td>
+<td>string</td>
+<td>Yes</td>
+<td>対象者（リソースサーバーの URL）</td>
+</tr>
+<tr>
+<td>exp</td>
+<td>number</td>
+<td>Yes</td>
+<td>有効期限（Unix timestamp）。発行から15分後</td>
+</tr>
+<tr>
+<td>iat</td>
+<td>number</td>
+<td>Yes</td>
+<td>発行日時（Unix timestamp）</td>
+</tr>
+<tr>
+<td>jti</td>
+<td>string (UUID)</td>
+<td>Yes</td>
+<td>トークン固有 ID。重複防止用</td>
+</tr>
+<tr>
+<td>client_id</td>
+<td>string</td>
+<td>Yes</td>
+<td>認可したクライアントの client_id</td>
+</tr>
+<tr>
+<td>scope</td>
+<td>string</td>
+<td>Yes</td>
+<td>許可されたスコープ（スペース区切り）</td>
+</tr>
+<tr>
+<td>username</td>
+<td>string</td>
+<td>No</td>
+<td>メンバー名（表示用。profile スコープ時のみ含む）</td>
+</tr>
+</tbody>
+</table>
+<h3>Client Credentials Grant のアクセストークン</h3>
+<p>メンバー不在のため <code>sub</code> にクライアント ID を使用し、<code>username</code> は含まない。</p>
+<pre><code class="language-json">{
+  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;,
+  &quot;sub&quot;: &quot;my-service-app&quot;,
+  &quot;aud&quot;: &quot;https://oauth.example.internal/api&quot;,
+  &quot;exp&quot;: 1719197300,
+  &quot;iat&quot;: 1719196400,
+  &quot;jti&quot;: &quot;a1b2c3d4-e5f6-7890-abcd-ef1234567890&quot;,
+  &quot;client_id&quot;: &quot;my-service-app&quot;,
+  &quot;scope&quot;: &quot;read&quot;,
+  &quot;grant_type&quot;: &quot;client_credentials&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>クレーム</th>
+<th>差分</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>sub</td>
+<td>メンバー UUID ではなく client_id</td>
+</tr>
+<tr>
+<td>grant_type</td>
+<td><code>client_credentials</code> を明示</td>
+</tr>
+<tr>
+<td>username</td>
+<td>含まない</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>JWKS エンドポイントのレスポンス</h2>
+<p><code>GET /oauth/jwks</code></p>
+<pre><code class="language-json">{
+  &quot;keys&quot;: [
+    {
+      &quot;kty&quot;: &quot;EC&quot;,
+      &quot;use&quot;: &quot;sig&quot;,
+      &quot;kid&quot;: &quot;key-1&quot;,
+      &quot;alg&quot;: &quot;ES256&quot;,
+      &quot;crv&quot;: &quot;P-256&quot;,
+      &quot;x&quot;: &quot;f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU&quot;,
+      &quot;y&quot;: &quot;x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0&quot;
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>フィールド</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kty</td>
+<td>鍵の種類。EC（楕円曲線）</td>
+</tr>
+<tr>
+<td>use</td>
+<td>用途。sig（署名）</td>
+</tr>
+<tr>
+<td>kid</td>
+<td>鍵 ID。JWT ヘッダーの kid と一致</td>
+</tr>
+<tr>
+<td>alg</td>
+<td>アルゴリズム。ES256</td>
+</tr>
+<tr>
+<td>crv</td>
+<td>曲線。P-256</td>
+</tr>
+<tr>
+<td>x, y</td>
+<td>公開鍵の座標（Base64url エンコード）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>リソースサーバーでの検証手順</h2>
+<pre><code>1. JWT ヘッダーの kid を取得
+2. JWKS キャッシュから kid に一致する公開鍵を検索
+   - 一致なし → JWKS を再取得してリトライ（鍵ローテーション対応）
+3. ES256 で署名検証
+4. クレームの検証:
+   a. iss == AUTH_JWT_ISSUER（環境変数）
+   b. aud == 期待する audience
+   c. exp &gt; 現在時刻（有効期限内）
+   d. iat &lt;= 現在時刻（未来のトークンを拒否）
+5. scope からエンドポイントに必要なスコープがあるか確認
+6. sub, client_id をリクエストコンテキストに格納
+</code></pre>
+<hr />
+<h2>鍵ローテーション</h2>
+<h3>手順</h3>
+<pre><code>1. 新しい鍵ペアを生成（kid: key-2）
+2. JWKS に新旧両方の鍵を公開
+3. 認可サーバーの署名鍵を key-2 に切り替え
+4. 旧トークンがすべて失効するまで待つ（最大15分）
+5. JWKS から旧鍵（key-1）を削除
+</code></pre>
+<h3>鍵生成コマンド（ES256）</h3>
+<pre><code class="language-bash"># 秘密鍵の生成
+openssl ecparam -genkey -name prime256v1 -noout -out private.pem
+
+# 公開鍵の抽出
+openssl ec -in private.pem -pubout -out public.pem
+</code></pre>
+<hr />
+<h2>トークンサイズの目安</h2>
+<p>ES256 のアクセストークン: <strong>約 400〜500 bytes</strong>（Base64url エンコード後）</p>
+<pre><code>eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleS0xIn0.
+eyJpc3MiOiJodHRwczovL29hdXRoLmV4YW1wbGUuaW50ZXJuYWwiLCJz
+dWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAi
+LCJhdWQiOiJodHRwczovL29hdXRoLmV4YW1wbGUuaW50ZXJuYWwvYXBp
+IiwiZXhwIjoxNzE5MTk3MzAwLCJpYXQiOjE3MTkxOTY0MDAsImp0aSI6
+ImExYjJjM2Q0LWU1ZjYtNzg5MC1hYmNkLWVmMTIzNDU2Nzg5MCIsImNs
+aWVudF9pZCI6Im15LWFwcCIsInNjb3BlIjoicmVhZCB3cml0ZSJ9.
+&lt;signature: 64 bytes&gt;
+</code></pre>
+</body>
+</html>
