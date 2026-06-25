@@ -1,0 +1,28 @@
+# Environment
+config/.env.prod
+.env
+
+# Keys
+keys/
+
+# Go
+auth-server/auth-server
+
+# Rust
+resource-server/target/
+
+# Vue / Node
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
