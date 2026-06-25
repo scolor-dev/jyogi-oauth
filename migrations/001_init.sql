@@ -169,12 +169,13 @@ GRANT SELECT ON auth.members TO jyogi_resource;
 ------------------------------------------------------------------------
 
 INSERT INTO auth.scopes (name, description, is_default) VALUES
+    ('openid',         'OpenID Connect 認証',                                      true),
     ('read',           'リソースの読み取り',                                       true),
     ('write',          'リソースの書き込み',                                       false),
     ('admin',          '管理者権限',                                               false),
     ('identity',       'メンバーの基本識別情報の読み取り（表示名、アイコン、カラー、タグライン）', true),
     ('identity:write', 'メンバーの基本識別情報の更新',                              false),
-    ('profile',        'メンバーの詳細プロフィールの読み取り（予定）',               false);
+    ('profile',        'メンバーの詳細プロフィール（name, preferred_username）',     false);
 
 -- Root admin member (password: 65536)
 INSERT INTO auth.members (username, password_hash, email, role) VALUES (

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -138,6 +139,86 @@ func (j *JWTService) SignClientCredentialsToken(clientID, scope string) (string,
 	token.Header["kid"] = j.kid
 
 	return token.SignedString(j.privateKey)
+}
+
+type IDTokenClaims struct {
+	MemberID string
+	ClientID string
+	Nonce    string
+	AuthTime int64
+	Scope    string
+	// profile claims
+	Name              string
+	PreferredUsername  string
+	// identity claims
+	Picture string
+	Color   string
+	Tagline string
+}
+
+func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
+	now := time.Now()
+
+	mapClaims := jwt.MapClaims{
+		"iss":       j.issuer,
+		"sub":       claims.MemberID,
+		"aud":       claims.ClientID,
+		"exp":       jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
+		"iat":       jwt.NewNumericDate(now),
+		"auth_time": claims.AuthTime,
+	}
+
+	if claims.Nonce != "" {
+		mapClaims["nonce"] = claims.Nonce
+	}
+
+	scopes := splitScopes(claims.Scope)
+	if contains(scopes, "profile") {
+		if claims.Name != "" {
+			mapClaims["name"] = claims.Name
+		}
+		if claims.PreferredUsername != "" {
+			mapClaims["preferred_username"] = claims.PreferredUsername
+		}
+	}
+	if contains(scopes, "identity") {
+		if claims.Name != "" {
+			mapClaims["name"] = claims.Name
+		}
+		if claims.Picture != "" {
+			mapClaims["picture"] = claims.Picture
+		}
+		if claims.Color != "" {
+			mapClaims["color"] = claims.Color
+		}
+		if claims.Tagline != "" {
+			mapClaims["tagline"] = claims.Tagline
+		}
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, mapClaims)
+	token.Header["kid"] = j.kid
+
+	return token.SignedString(j.privateKey)
+}
+
+func splitScopes(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, " ") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (j *JWTService) VerifyToken(tokenString string) (jwt.MapClaims, error) {

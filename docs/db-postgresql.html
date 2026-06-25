@@ -297,12 +297,13 @@ CREATE UNIQUE INDEX idx_scopes_name ON auth.scopes (name);
 </table>
 <p><strong>初期データ:</strong></p>
 <pre><code class="language-sql">INSERT INTO auth.scopes (name, description, is_default) VALUES
+    ('openid',           'OpenID Connect 認証', true),
     ('read',             'リソースの読み取り', true),
     ('write',            'リソースの書き込み', false),
     ('admin',            '管理者権限', false),
     ('identity',         'メンバーの基本識別情報の読み取り（表示名、アイコン、カラー、タグライン）', true),
     ('identity:write',   'メンバーの基本識別情報の更新', false),
-    ('profile',          'メンバーの詳細プロフィールの読み取り（予定）', false);
+    ('profile',          'メンバーの詳細プロフィール（name, preferred_username）', false);
 </code></pre>
 <hr />
 <h3>auth.client_scopes</h3>

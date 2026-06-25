@@ -152,6 +152,7 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 		Scope:               scope,
 		CodeChallenge:       params.CodeChallenge,
 		CodeChallengeMethod: params.CodeChallengeMethod,
+		Nonce:               params.Nonce,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store code")

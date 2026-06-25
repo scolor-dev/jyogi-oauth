@@ -62,7 +62,7 @@
 <h1>jyogi-oauth 設計書</h1>
 
 <h2>概要</h2>
-<p>部内向け OAuth 2.0 認可基盤。認可サーバー・リソースサーバー・フロントエンドを1台の Linux サーバーに Docker Compose で構築し、将来的にサーバー分離が可能な設計とする。</p>
+<p>部内向け OAuth 2.0 / OpenID Connect 認可基盤。認可サーバー・リソースサーバー・フロントエンドを1台の Linux サーバーに Docker Compose で構築し、将来的にサーバー分離が可能な設計とする。</p>
 
 <hr>
 
@@ -110,7 +110,7 @@
 
 <hr>
 
-<h2>OAuth 2.0 フロー（Authorization Code + PKCE）</h2>
+<h2>OAuth 2.0 / OIDC フロー（Authorization Code + PKCE）</h2>
 
 <div class="diagram">
 <div class="flow-step">
@@ -180,7 +180,7 @@
   <div class="flow-num">10</div>
   <div class="flow-content">
     <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-client">Client</span></div>
-    トークンレスポンス: <code>{ access_token(JWT), refresh_token, token_type, expires_in: 900, scope }</code>
+    トークンレスポンス: <code>{ access_token(JWT), refresh_token, id_token(openid時), token_type, expires_in: 900, scope }</code>
   </div>
 </div>
 <div class="flow-step">
@@ -283,7 +283,7 @@
 
 <h3>Go 認可サーバー (:8080)</h3>
 
-<h4>OAuth コア</h4>
+<h4>OAuth / OIDC コア</h4>
 <table>
 <thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead>
 <tbody>
@@ -292,7 +292,8 @@
 <tr><td><code>POST</code></td><td>/oauth/revoke</td><td>トークン失効</td></tr>
 <tr><td><code>GET</code></td><td>/oauth/jwks</td><td>公開鍵 (JWKS)</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/introspect</td><td>トークンイントロスペクション</td></tr>
-<tr><td><code>GET</code></td><td>/oauth/userinfo</td><td>メンバー情報</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/userinfo</td><td>OIDC UserInfo（スコープに応じたクレーム）</td></tr>
+<tr><td><code>GET</code></td><td>/.well-known/openid-configuration</td><td>OIDC Discovery</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/login</td><td>ログイン認証</td></tr>
 <tr><td><code>GET/POST</code></td><td>/oauth/consent</td><td>同意情報取得・処理</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/logout</td><td>ログアウト</td></tr>

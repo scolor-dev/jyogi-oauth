@@ -3,8 +3,11 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jyogi-oauth/auth-server/internal/config"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
@@ -18,6 +21,7 @@ type TokenHandler struct {
 	memberStore   *store.MemberStore
 	jwtService    *oauth.JWTService
 	auditStore    *store.AuditStore
+	pool          *pgxpool.Pool
 	cfg           *config.Config
 }
 
@@ -28,6 +32,7 @@ func NewTokenHandler(
 	memberStore *store.MemberStore,
 	jwtService *oauth.JWTService,
 	auditStore *store.AuditStore,
+	pool *pgxpool.Pool,
 	cfg *config.Config,
 ) *TokenHandler {
 	return &TokenHandler{
@@ -37,6 +42,7 @@ func NewTokenHandler(
 		memberStore:   memberStore,
 		jwtService:    jwtService,
 		auditStore:    auditStore,
+		pool:          pool,
 		cfg:           cfg,
 	}
 }
@@ -149,13 +155,60 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		"grant_type": "authorization_code",
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"access_token":  accessToken,
 		"token_type":    "Bearer",
 		"expires_in":    int(h.cfg.AccessTokenTTL.Seconds()),
 		"refresh_token": refreshToken,
 		"scope":         codeData.Scope,
-	})
+	}
+
+	if hasScope(codeData.Scope, "openid") {
+		idTokenClaims := oauth.IDTokenClaims{
+			MemberID:         codeData.MemberID,
+			ClientID:         clientID,
+			Nonce:            codeData.Nonce,
+			AuthTime:         time.Now().Unix(),
+			Scope:            codeData.Scope,
+			PreferredUsername: member.Username,
+		}
+		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(codeData.MemberID))
+		if idToken, err := h.jwtService.SignIDToken(idTokenClaims); err == nil {
+			resp["id_token"] = idToken
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func hasScope(scopeStr, target string) bool {
+	for _, s := range strings.Split(scopeStr, " ") {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *TokenHandler) fillIdentityClaims(r *http.Request, claims *oauth.IDTokenClaims, memberID uuid.UUID) {
+	var displayName, avatarURL, themeColor, tagline *string
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT display_name, avatar_url, theme_color, tagline FROM resource.member_identities WHERE member_id = $1`,
+		memberID,
+	).Scan(&displayName, &avatarURL, &themeColor, &tagline)
+
+	if displayName != nil {
+		claims.Name = *displayName
+	}
+	if avatarURL != nil {
+		claims.Picture = *avatarURL
+	}
+	if themeColor != nil {
+		claims.Color = *themeColor
+	}
+	if tagline != nil {
+		claims.Tagline = *tagline
+	}
 }
 
 func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
