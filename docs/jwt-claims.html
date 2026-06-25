@@ -186,6 +186,7 @@
   "exp": 1719197300,
   "iat": 1719196400,
   "auth_time": 1719196000,
+  "at_hash": "LDktKdoQak3Pk0cnXxCltA",
   "nonce": "random-nonce-from-client",
   "preferred_username": "tanaka",
   "name": "田中 太郎",
@@ -201,6 +202,7 @@
 <tr><td>aud</td><td>常に</td><td>client_id（access_token と異なり、クライアントID が入る）</td></tr>
 <tr><td>exp / iat</td><td>常に</td><td>有効期限 / 発行時刻</td></tr>
 <tr><td>auth_time</td><td>常に</td><td>認証実行時刻</td></tr>
+<tr><td>at_hash</td><td>常に</td><td>access_token の SHA-256 ハッシュ前半128bit を Base64url エンコード。クライアントが access_token と id_token の紐付けを検証する</td></tr>
 <tr><td>nonce</td><td>指定時</td><td>authorize リクエストの nonce をそのまま返す（リプレイ攻撃防止）</td></tr>
 <tr><td>preferred_username</td><td>scope: profile</td><td>ユーザー名</td></tr>
 <tr><td>name</td><td>scope: profile or identity</td><td>表示名</td></tr>

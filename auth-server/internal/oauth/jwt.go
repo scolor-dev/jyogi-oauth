@@ -3,6 +3,7 @@ package oauth
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -142,11 +143,12 @@ func (j *JWTService) SignClientCredentialsToken(clientID, scope string) (string,
 }
 
 type IDTokenClaims struct {
-	MemberID string
-	ClientID string
-	Nonce    string
-	AuthTime int64
-	Scope    string
+	MemberID    string
+	ClientID    string
+	Nonce       string
+	AuthTime    int64
+	Scope       string
+	AccessToken string
 	// profile claims
 	Name              string
 	PreferredUsername  string
@@ -166,6 +168,10 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 		"exp":       jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
 		"iat":       jwt.NewNumericDate(now),
 		"auth_time": claims.AuthTime,
+	}
+
+	if claims.AccessToken != "" {
+		mapClaims["at_hash"] = computeAtHash(claims.AccessToken)
 	}
 
 	if claims.Nonce != "" {
@@ -210,6 +216,11 @@ func splitScopes(s string) []string {
 		}
 	}
 	return out
+}
+
+func computeAtHash(accessToken string) string {
+	h := sha256.Sum256([]byte(accessToken))
+	return base64.RawURLEncoding.EncodeToString(h[:16])
 }
 
 func contains(ss []string, s string) bool {

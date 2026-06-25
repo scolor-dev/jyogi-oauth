@@ -170,6 +170,7 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 			Nonce:            codeData.Nonce,
 			AuthTime:         time.Now().Unix(),
 			Scope:            codeData.Scope,
+			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
 		}
 		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(codeData.MemberID))
@@ -303,6 +304,7 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 			ClientID:         clientID,
 			AuthTime:         time.Now().Unix(),
 			Scope:            scope,
+			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
 		}
 		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(tokenData.MemberID))
