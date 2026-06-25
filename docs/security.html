@@ -158,7 +158,7 @@ if ($request_method = OPTIONS) {
 <tbody>
 <tr>
 <td>/oauth/authorize</td>
-<td><code>state</code> パラメータで CSRF 防止（OAuth 2.0 仕様）</td>
+<td><code>state</code> パラメータで CSRF 防止（OAuth 2.0 仕様）。OIDC 時は <code>nonce</code> でリプレイ攻撃防止</td>
 </tr>
 <tr>
 <td>/oauth/token</td>
@@ -366,6 +366,18 @@ Retry-After: 30
 <td>失効方法</td>
 <td>自然失効のみ（最大15分待ち）</td>
 </tr>
+</tbody>
+</table>
+<h3>ID トークン（OIDC）</h3>
+<table>
+<thead><tr><th>項目</th><th>設計</th></tr></thead>
+<tbody>
+<tr><td>形式</td><td>JWT（ES256 署名）</td></tr>
+<tr><td>発行条件</td><td>scope に <code>openid</code> を含む場合のみ</td></tr>
+<tr><td>aud</td><td>client_id（access_token の aud とは異なる）</td></tr>
+<tr><td>nonce</td><td>authorize リクエストで指定された場合に含める。<strong>クライアント側で検証必須</strong></td></tr>
+<tr><td>auth_time</td><td>認証実行時刻</td></tr>
+<tr><td>refresh 時</td><td>refresh_token grant でも scope に openid を含む場合は再発行</td></tr>
 </tbody>
 </table>
 <h3>リフレッシュトークン</h3>

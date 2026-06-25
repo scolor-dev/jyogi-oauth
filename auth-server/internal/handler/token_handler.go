@@ -289,13 +289,29 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"access_token":  accessToken,
 		"token_type":    "Bearer",
 		"expires_in":    int(h.cfg.AccessTokenTTL.Seconds()),
 		"refresh_token": newRefreshToken,
 		"scope":         scope,
-	})
+	}
+
+	if hasScope(scope, "openid") {
+		idTokenClaims := oauth.IDTokenClaims{
+			MemberID:         tokenData.MemberID,
+			ClientID:         clientID,
+			AuthTime:         time.Now().Unix(),
+			Scope:            scope,
+			PreferredUsername: member.Username,
+		}
+		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(tokenData.MemberID))
+		if idToken, err := h.jwtService.SignIDToken(idTokenClaims); err == nil {
+			resp["id_token"] = idToken
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *TokenHandler) handleClientCredentials(w http.ResponseWriter, r *http.Request) {
