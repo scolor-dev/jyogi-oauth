@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スコープとデータ — jyogi-oauth 開発者ガイド</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+.scope-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.2rem; margin: 1rem 0; }
+.scope-card h3 { margin-bottom: 0.5rem; }
+.scope-card code { font-size: 1rem; }
+.scope-card p { font-size: 0.9rem; color: #666; margin-bottom: 0.8rem; }
+.default-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #e8f5e9; color: #2e7d32; font-weight: 600; margin-left: 0.5rem; }
+</style>
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="../index.html">Top</a></li>
+<li><a href="index.html">Developer Guide</a></li>
+<li><strong>Scopes</strong></li>
+</ul>
+</nav>
+
+<h1>スコープとデータ</h1>
+<p>クライアントが <code>/oauth/authorize</code> で要求できるスコープと、各スコープで取得可能なデータの対応です。</p>
+
+<hr>
+
+<h2>スコープ一覧</h2>
+
+<div class="scope-card">
+  <h3><code>openid</code> <span class="default-badge">default</span></h3>
+  <p>OpenID Connect 認証。トークンレスポンスに <code>id_token</code> が追加される。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>返却されるクレーム</th></tr></thead>
+  <tbody>
+  <tr><td>/oauth/userinfo</td><td><code>sub</code></td></tr>
+  <tr><td>id_token</td><td><code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code>, <code>iat</code>, <code>auth_time</code>, <code>at_hash</code>, <code>nonce</code>（指定時）</td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>identity</code> <span class="default-badge">default</span></h3>
+  <p>メンバーの基本識別情報（表示名、アイコン、テーマカラー、タグライン）。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>返却されるクレーム</th></tr></thead>
+  <tbody>
+  <tr><td>/oauth/userinfo</td><td><code>name</code>, <code>picture</code>, <code>color</code>, <code>tagline</code></td></tr>
+  <tr><td>id_token</td><td>同上</td></tr>
+  <tr><td>/api/v1/members/me/identity</td><td><code>display_name</code>, <code>avatar_url</code>, <code>theme_color</code>, <code>tagline</code></td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>profile</code></h3>
+  <p>メンバーの詳細プロフィール情報。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>返却されるクレーム</th></tr></thead>
+  <tbody>
+  <tr><td>/oauth/userinfo</td><td><code>name</code>, <code>preferred_username</code>, <code>updated_at</code></td></tr>
+  <tr><td>id_token</td><td><code>name</code>, <code>preferred_username</code></td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>read</code> <span class="default-badge">default</span></h3>
+  <p>リソースサーバーの読み取り権限。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>許可される操作</th></tr></thead>
+  <tbody>
+  <tr><td>/api/v1/*</td><td>GET リクエスト</td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>write</code></h3>
+  <p>リソースサーバーの書き込み権限。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>許可される操作</th></tr></thead>
+  <tbody>
+  <tr><td>/api/v1/*</td><td>POST, PUT, DELETE リクエスト</td></tr>
+  <tr><td>/api/v1/members/me/identity</td><td>PUT（プロフィール更新）</td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>identity:write</code></h3>
+  <p>Identity の更新権限。<code>write</code> の代わりに Identity 更新のみ許可したい場合に使用。</p>
+  <table>
+  <thead><tr><th>エンドポイント</th><th>許可される操作</th></tr></thead>
+  <tbody>
+  <tr><td>/api/v1/members/me/identity</td><td>PUT（プロフィール更新）</td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="scope-card">
+  <h3><code>admin</code></h3>
+  <p>管理者権限。管理 API へのアクセスに使用。通常のクライアントアプリでは要求しません。</p>
+</div>
+
+<hr>
+
+<h2>スコープの組み合わせ例</h2>
+
+<table>
+<thead><tr><th>ユースケース</th><th>scope</th></tr></thead>
+<tbody>
+<tr><td>ログインだけ（誰か確認）</td><td><code>openid</code></td></tr>
+<tr><td>ログイン + アイコン・名前表示</td><td><code>openid identity</code></td></tr>
+<tr><td>プロフィール閲覧アプリ</td><td><code>openid identity read</code></td></tr>
+<tr><td>プロフィール編集アプリ</td><td><code>openid identity identity:write</code></td></tr>
+<tr><td>サーバー間 API 連携</td><td><code>read</code>（client_credentials grant）</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>スコープの default について</h2>
+<p><code>default</code> マークのスコープは、クライアント登録時にデフォルトで付与されます。クライアントが要求できるスコープは、管理者が設定した <code>allowed_scopes</code> の範囲内です。</p>
+
+</body>
+</html>

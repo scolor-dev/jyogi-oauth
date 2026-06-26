@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>クイックスタート — jyogi-oauth 開発者ガイド</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+.step { margin: 2rem 0; }
+.step-header { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.8rem; }
+.step-num { display: inline-flex; align-items: center; justify-content: center; background: #1976d2; color: #fff; border-radius: 50%; width: 32px; height: 32px; font-size: 1rem; font-weight: 700; flex-shrink: 0; }
+.step-title { font-size: 1.2rem; font-weight: 600; }
+.note { background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.8rem 1rem; margin: 0.8rem 0; border-radius: 0 4px 4px 0; font-size: 0.9rem; }
+.tip { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 0.8rem 1rem; margin: 0.8rem 0; border-radius: 0 4px 4px 0; font-size: 0.9rem; }
+.response-label { font-size: 0.8rem; color: #888; margin-bottom: 0.2rem; }
+</style>
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="../index.html">Top</a></li>
+<li><a href="index.html">Developer Guide</a></li>
+<li><strong>Quickstart</strong></li>
+</ul>
+</nav>
+
+<h1>クイックスタート</h1>
+<p>jyogi-oauth を使ったアプリケーション認証を curl で一通り体験します。所要時間: 約5分。</p>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">0</span>
+  <span class="step-title">前提</span>
+</div>
+<p>jyogi-oauth が <code>http://localhost</code> で稼働していること。ダッシュボードにログインできるアカウントがあること。</p>
+<pre><code class="language-bash"># ヘルスチェック
+curl http://localhost/oauth/health</code></pre>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">1</span>
+  <span class="step-title">クライアントを登録する</span>
+</div>
+<p>ダッシュボードの「My Clients」タブから登録するか、API で直接作成します。</p>
+<pre><code class="language-bash"># ログイン（セッション Cookie 取得）
+curl -c cookies.txt -X POST http://localhost/oauth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"YOUR_USERNAME","password":"YOUR_PASSWORD"}'
+
+# クライアント作成
+curl -b cookies.txt -X POST http://localhost/oauth/me/clients \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "My Test App",
+    "client_type": "public",
+    "redirect_uris": ["http://localhost:3000/callback"]
+  }'</code></pre>
+<p class="response-label">レスポンス:</p>
+<pre><code class="language-json">{
+  "client": {
+    "client_id": "a1b2c3d4",
+    "name": "My Test App",
+    "client_type": "public",
+    "redirect_uris": ["http://localhost:3000/callback"],
+    ...
+  }
+}</code></pre>
+<p class="note"><code>client_id</code> を控えてください。以降のステップで使います。<br><code>client_type: "confidential"</code> の場合は <code>client_secret</code> も返されます（一度きり表示）。</p>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">2</span>
+  <span class="step-title">PKCE パラメータを生成する</span>
+</div>
+<p>Authorization Code + PKCE フローでは、<code>code_verifier</code>（ランダム文字列）と <code>code_challenge</code>（その SHA-256 ハッシュ）が必要です。</p>
+<pre><code class="language-bash"># code_verifier: 43〜128文字のランダム文字列
+CODE_VERIFIER=$(openssl rand -base64 32 | tr -d '=/+' | head -c 43)
+
+# code_challenge: code_verifier の SHA-256 を Base64url エンコード
+CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+
+echo "code_verifier:  $CODE_VERIFIER"
+echo "code_challenge: $CODE_CHALLENGE"</code></pre>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">3</span>
+  <span class="step-title">認可リクエストを送る</span>
+</div>
+<p>ブラウザでこの URL を開きます。メンバーがログインし、スコープへの同意を行います。</p>
+<pre><code class="language-text">http://localhost/oauth/authorize?
+  response_type=code
+  &client_id=YOUR_CLIENT_ID
+  &redirect_uri=http://localhost:3000/callback
+  &scope=openid identity read
+  &state=random_csrf_string
+  &code_challenge=YOUR_CODE_CHALLENGE
+  &code_challenge_method=S256
+  &nonce=random_nonce_string</code></pre>
+<p class="tip"><code>state</code> は CSRF 対策用のランダム文字列。コールバック時に一致を検証してください。<br><code>nonce</code> は id_token のリプレイ攻撃防止用（OIDC）。省略可。</p>
+<p>同意後、ブラウザは <code>redirect_uri</code> にリダイレクトされます:</p>
+<pre><code class="language-text">http://localhost:3000/callback?code=AUTH_CODE&state=random_csrf_string</code></pre>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">4</span>
+  <span class="step-title">認可コードをトークンに交換する</span>
+</div>
+<pre><code class="language-bash">curl -X POST http://localhost/oauth/token \
+  -d "grant_type=authorization_code" \
+  -d "code=AUTH_CODE" \
+  -d "redirect_uri=http://localhost:3000/callback" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "code_verifier=$CODE_VERIFIER"</code></pre>
+<p class="response-label">レスポンス:</p>
+<pre><code class="language-json">{
+  "access_token": "eyJhbGciOiJFUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2g...",
+  "scope": "openid identity read",
+  "id_token": "eyJhbGciOiJFUzI1NiIs..."
+}</code></pre>
+<p class="note"><code>scope</code> に <code>openid</code> を含めた場合、<code>id_token</code> が返されます。<br><code>access_token</code> の有効期限は 15 分です。</p>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">5</span>
+  <span class="step-title">API を呼び出す</span>
+</div>
+<p><code>access_token</code> を <code>Authorization: Bearer</code> ヘッダーに付けてリソースサーバーにリクエストします。</p>
+<pre><code class="language-bash"># UserInfo（認可サーバー）
+curl -H "Authorization: Bearer ACCESS_TOKEN" \
+  http://localhost/oauth/userinfo
+
+# メンバー Identity（リソースサーバー）
+curl -H "Authorization: Bearer ACCESS_TOKEN" \
+  http://localhost/api/v1/members/me/identity</code></pre>
+<p class="response-label">UserInfo レスポンス（scope: openid identity）:</p>
+<pre><code class="language-json">{
+  "sub": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "田中 太郎",
+  "picture": "https://cdn.example/avatar.png",
+  "color": "#4A90D9",
+  "tagline": "Engineer"
+}</code></pre>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">6</span>
+  <span class="step-title">トークンをリフレッシュする</span>
+</div>
+<p><code>access_token</code> が期限切れになったら、<code>refresh_token</code> で新しいトークンを取得します。</p>
+<pre><code class="language-bash">curl -X POST http://localhost/oauth/token \
+  -d "grant_type=refresh_token" \
+  -d "refresh_token=YOUR_REFRESH_TOKEN" \
+  -d "client_id=YOUR_CLIENT_ID"</code></pre>
+<p class="note">リフレッシュトークンは<strong>使い捨て</strong>です（ローテーション）。レスポンスに含まれる新しい <code>refresh_token</code> を次回使用してください。</p>
+</div>
+
+<hr>
+
+<div class="step">
+<div class="step-header">
+  <span class="step-num">7</span>
+  <span class="step-title">トークンを失効させる</span>
+</div>
+<pre><code class="language-bash">curl -X POST http://localhost/oauth/revoke \
+  -d "token=YOUR_REFRESH_TOKEN" \
+  -d "client_id=YOUR_CLIENT_ID"</code></pre>
+<p>常に HTTP 200 が返ります（RFC 7009）。</p>
+</div>
+
+<hr>
+
+<h2>OIDC Discovery</h2>
+<p>クライアントライブラリの自動設定に使えます:</p>
+<pre><code class="language-bash">curl http://localhost/.well-known/openid-configuration</code></pre>
+<p>エンドポイント URL、対応スコープ、署名アルゴリズム等が JSON で返されます。</p>
+
+<hr>
+
+<h2>Client Credentials Grant（サーバー間通信）</h2>
+<p>ユーザー操作なしでトークンを取得する場合（バッチ処理、内部API連携）:</p>
+<pre><code class="language-bash">curl -X POST http://localhost/oauth/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "scope=read"</code></pre>
+<p class="note"><code>client_type: "confidential"</code> のクライアントのみ使用可能。<code>refresh_token</code> は発行されません。</p>
+
+</body>
+</html>
