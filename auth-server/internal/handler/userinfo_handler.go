@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
@@ -37,7 +38,23 @@ func (h *UserInfoHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 
 	sub, _ := claims["sub"].(string)
 	scope, _ := claims["scope"].(string)
+
+	if !oauth.HasScope(scope, "openid") {
+		w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope"`)
+		writeError(w, http.StatusForbidden, "insufficient_scope", "openid scope is required for userinfo")
+		return
+	}
+
+	if grantType, _ := claims["grant_type"].(string); grantType == "client_credentials" {
+		writeError(w, http.StatusForbidden, "forbidden", "UserInfo is not available for client_credentials tokens")
+		return
+	}
+
 	memberID := mustParseUUID(sub)
+	if memberID == (uuid.UUID{}) {
+		writeError(w, http.StatusBadRequest, "invalid_token", "Invalid subject in token")
+		return
+	}
 
 	member, err := h.memberStore.GetByID(r.Context(), memberID)
 	if err != nil || member == nil {
