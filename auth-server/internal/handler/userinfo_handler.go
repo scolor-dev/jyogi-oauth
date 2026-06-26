@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
@@ -11,10 +12,11 @@ import (
 type UserInfoHandler struct {
 	memberStore *store.MemberStore
 	jwtService  *oauth.JWTService
+	pool        *pgxpool.Pool
 }
 
-func NewUserInfoHandler(memberStore *store.MemberStore, jwtService *oauth.JWTService) *UserInfoHandler {
-	return &UserInfoHandler{memberStore: memberStore, jwtService: jwtService}
+func NewUserInfoHandler(memberStore *store.MemberStore, jwtService *oauth.JWTService, pool *pgxpool.Pool) *UserInfoHandler {
+	return &UserInfoHandler{memberStore: memberStore, jwtService: jwtService, pool: pool}
 }
 
 func (h *UserInfoHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +36,7 @@ func (h *UserInfoHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sub, _ := claims["sub"].(string)
+	scope, _ := claims["scope"].(string)
 	memberID := mustParseUUID(sub)
 
 	member, err := h.memberStore.GetByID(r.Context(), memberID)
@@ -42,9 +45,34 @@ func (h *UserInfoHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"sub":      member.ID.String(),
-		"username": member.Username,
-		"email":    member.Email,
-	})
+	resp := map[string]any{
+		"sub": member.ID.String(),
+	}
+
+	if oauth.HasScope(scope, "profile") {
+		resp["name"] = member.Username
+		resp["preferred_username"] = member.Username
+		resp["username"] = member.Username
+		resp["updated_at"] = member.UpdatedAt.Unix()
+	}
+
+	if oauth.HasScope(scope, "identity") {
+		ic := getIdentityClaims(r.Context(), h.pool, memberID)
+		if ic != nil {
+			if ic.DisplayName != nil {
+				resp["name"] = *ic.DisplayName
+			}
+			if ic.AvatarURL != nil {
+				resp["picture"] = *ic.AvatarURL
+			}
+			if ic.ThemeColor != nil {
+				resp["color"] = *ic.ThemeColor
+			}
+			if ic.Tagline != nil {
+				resp["tagline"] = *ic.Tagline
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

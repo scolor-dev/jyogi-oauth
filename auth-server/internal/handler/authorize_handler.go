@@ -50,6 +50,7 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	state := q.Get("state")
 	codeChallenge := q.Get("code_challenge")
 	codeChallengeMethod := q.Get("code_challenge_method")
+	nonce := q.Get("nonce")
 
 	if responseType != "code" {
 		writeError(w, http.StatusBadRequest, "unsupported_response_type", "Only 'code' is supported")
@@ -90,6 +91,7 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		State:               state,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Nonce:               nonce,
 	}
 
 	// Not logged in: save OAuth params and redirect to login
@@ -136,7 +138,7 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	requestedScopes := strings.Split(scope, " ")
 	if consent != nil && scopesCovered(consent.Scopes, requestedScopes) {
 		// Already consented: issue auth code and redirect to client
-		h.issueAuthCodeAndRedirect(w, r, client.ClientID, memberID.String(), redirectURI, scope, codeChallenge, codeChallengeMethod, state)
+		h.issueAuthCodeAndRedirect(w, r, client.ClientID, memberID.String(), redirectURI, scope, codeChallenge, codeChallengeMethod, state, nonce)
 		return
 	}
 
@@ -147,11 +149,16 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/consent", http.StatusFound)
 }
 
-func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *http.Request, clientID, memberID, redirectURI, scope, codeChallenge, codeChallengeMethod, state string) {
+func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *http.Request, clientID, memberID, redirectURI, scope, codeChallenge, codeChallengeMethod, state, nonce string) {
 	code, err := oauth.GenerateRandomString(h.cfg.CodeLength)
 	if err != nil {
 		httpRedirectWithError(w, r, redirectURI, state, "server_error", "Failed to generate code")
 		return
+	}
+
+	var authTime int64
+	if session := middleware.GetSession(r.Context()); session != nil {
+		authTime = session.CreatedAt
 	}
 
 	err = h.authCodeStore.Save(r.Context(), code, &store.AuthCodeData{
@@ -160,7 +167,9 @@ func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *ht
 		RedirectURI:         redirectURI,
 		Scope:               scope,
 		CodeChallenge:       codeChallenge,
+		Nonce:               nonce,
 		CodeChallengeMethod: codeChallengeMethod,
+		AuthTime:            authTime,
 	})
 	if err != nil {
 		httpRedirectWithError(w, r, redirectURI, state, "server_error", "Failed to store code")

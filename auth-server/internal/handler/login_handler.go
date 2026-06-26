@@ -140,6 +140,9 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 		v.Set("state", oauthParams.State)
 		v.Set("code_challenge", oauthParams.CodeChallenge)
 		v.Set("code_challenge_method", oauthParams.CodeChallengeMethod)
+		if oauthParams.Nonce != "" {
+			v.Set("nonce", oauthParams.Nonce)
+		}
 		redirectTo = "/oauth/authorize?" + v.Encode()
 	}
 

@@ -81,11 +81,12 @@ func main() {
 		sessionStore, consentStore, authCodeStore, clientStore, scopeStore, auditStore, cfg,
 	)
 	tokenHandler := handler.NewTokenHandler(
-		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, cfg,
+		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, pool, cfg,
 	)
 	revokeHandler := handler.NewRevokeHandler(refreshStore, clientStore, auditStore)
 	introspectHandler := handler.NewIntrospectHandler(jwtService)
-	userinfoHandler := handler.NewUserInfoHandler(memberStore, jwtService)
+	userinfoHandler := handler.NewUserInfoHandler(memberStore, jwtService, pool)
+	discoveryHandler := handler.NewDiscoveryHandler(cfg.JWTIssuer)
 	adminClientHandler := handler.NewAdminClientHandler(clientStore, auditStore)
 	meHandler := handler.NewMeHandler(memberStore, sessionStore, pool, cfg.SessionCookieName)
 	meIdentityHandler := handler.NewMeIdentityHandler(pool)
@@ -121,6 +122,7 @@ func main() {
 			status, pgStatus, redisStatus)
 	})
 
+	mux.Handle("GET /.well-known/openid-configuration", discoveryHandler)
 	mux.Handle("GET /oauth/jwks", jwksHandler)
 	mux.HandleFunc("POST /oauth/login", loginHandler.Login)
 	mux.HandleFunc("GET /oauth/authorize", authorizeHandler.Authorize)

@@ -26,6 +26,24 @@
 Nginx 経由: https://oauth.example.internal/oauth/*
 </code></pre>
 <hr />
+<h2>OpenID Connect Discovery</h2>
+<h3><span class="method method-get">GET</span> /.well-known/openid-configuration</h3>
+<p>OIDC ディスカバリドキュメント。クライアントライブラリの自動設定に使用。</p>
+<pre><code class="language-json">{
+  "issuer": "https://oauth.example.internal",
+  "authorization_endpoint": "https://oauth.example.internal/oauth/authorize",
+  "token_endpoint": "https://oauth.example.internal/oauth/token",
+  "userinfo_endpoint": "https://oauth.example.internal/oauth/userinfo",
+  "jwks_uri": "https://oauth.example.internal/oauth/jwks",
+  "scopes_supported": ["openid", "profile", "identity", "identity:write", "read", "write"],
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["ES256"],
+  "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]
+}</code></pre>
+<p><strong>キャッシュ:</strong> <code>Cache-Control: public, max-age=86400</code></p>
+<hr />
 <h2>ヘルスチェック</h2>
 <h3><span class="method method-get">GET</span> /oauth/health</h3>
 <p>認証不要。PostgreSQL / Redis の接続状態を返す。</p>
@@ -85,6 +103,11 @@ Nginx 経由: https://oauth.example.internal/oauth/*
 <td>code_challenge_method</td>
 <td>Yes</td>
 <td><code>S256</code> 固定</td>
+</tr>
+<tr>
+<td>nonce</td>
+<td>No</td>
+<td>OIDC: リプレイ攻撃防止用。<code>id_token</code> にそのまま含まれる</td>
 </tr>
 </tbody>
 </table>
@@ -195,9 +218,11 @@ Cache-Control: no-store
   &quot;token_type&quot;: &quot;Bearer&quot;,
   &quot;expires_in&quot;: 900,
   &quot;refresh_token&quot;: &quot;dGhpcyBpcyBhIHJlZnJlc2g...&quot;,
-  &quot;scope&quot;: &quot;read write&quot;
+  &quot;scope&quot;: &quot;openid identity profile&quot;,
+  &quot;id_token&quot;: &quot;eyJhbGciOiJFUzI1NiIs...&quot;
 }
 </code></pre>
+<p><code>id_token</code> は <code>scope</code> に <code>openid</code> を含む場合のみ返却。含まない場合は従来の OAuth 2.0 レスポンス。</p>
 <h4>Grant Type: refresh_token</h4>
 <p><strong>リクエストボディ:</strong></p>
 <table>
@@ -427,19 +452,31 @@ Content-Type: application/json
 </code></pre>
 <p><strong>キャッシュ:</strong> <code>Cache-Control: public, max-age=3600</code></p>
 <hr />
-<h2>メンバー情報</h2>
-<h3>GET /oauth/userinfo</h3>
-<p>アクセストークンに紐づくメンバー情報を返す。</p>
+<h2>UserInfo（OIDC）</h2>
+<h3><span class="method method-get">GET</span> /oauth/userinfo</h3>
+<p>アクセストークンに紐づくメンバー情報を返す。返却するクレームは scope に応じて変化。</p>
 <p><strong>認証:</strong> <code>Authorization: Bearer {access_token}</code></p>
-<p><strong>必要スコープ:</strong> <code>openid</code>（または <code>profile</code>）</p>
-<p><strong>成功レスポンス:</strong></p>
+
+<h4>スコープとクレームの対応</h4>
+<table>
+<thead><tr><th>スコープ</th><th>返却するクレーム</th></tr></thead>
+<tbody>
+<tr><td><code>openid</code></td><td><code>sub</code></td></tr>
+<tr><td><code>profile</code></td><td><code>name</code>, <code>preferred_username</code>, <code>updated_at</code></td></tr>
+<tr><td><code>identity</code></td><td><code>name</code>, <code>picture</code>, <code>color</code>, <code>tagline</code></td></tr>
+</tbody>
+</table>
+
+<p><strong>レスポンス例（scope: openid identity profile）:</strong></p>
 <pre><code class="language-json">{
-  &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
-  &quot;username&quot;: &quot;tanaka&quot;,
-  &quot;email&quot;: &quot;tanaka@example.internal&quot;,
-  &quot;name&quot;: &quot;田中 太郎&quot;
-}
-</code></pre>
+  "sub": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "田中 太郎",
+  "preferred_username": "tanaka",
+  "updated_at": 1719200000,
+  "picture": "https://cdn.example.internal/avatar.png",
+  "color": "#4A90D9",
+  "tagline": "Engineer"
+}</code></pre>
 <p><strong>エラーレスポンス:</strong></p>
 <pre><code>HTTP/1.1 401 Unauthorized
 WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
@@ -474,7 +511,6 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <p>同意フォームからのリクエストを処理する。</p>
 <p><strong>リクエストボディ（JSON）:</strong></p>
 <pre><code class="language-json">{
-  &quot;consent_id&quot;: &quot;session-stored-id&quot;,
   &quot;approved&quot;: true,
   &quot;scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
 }

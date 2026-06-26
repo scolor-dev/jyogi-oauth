@@ -16,6 +16,7 @@ type RefreshTokenData struct {
 	MemberID  string `json:"member_id"`
 	ClientID  string `json:"client_id"`
 	Scope     string `json:"scope"`
+	AuthTime  int64  `json:"auth_time,omitempty"`
 	IssuedAt  int64  `json:"issued_at"`
 	ExpiresAt int64  `json:"expires_at"`
 }
