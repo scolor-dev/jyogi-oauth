@@ -176,3 +176,48 @@ func (h *AdminMemberHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *AdminMemberHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid member ID")
+		return
+	}
+
+	member, err := h.memberStore.GetByID(r.Context(), id)
+	if err != nil || member == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Member not found")
+		return
+	}
+
+	tempPassword, err := oauth.GenerateRandomString(9)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate password")
+		return
+	}
+
+	hash, err := oauth.HashPassword(tempPassword, h.pwConfig)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to hash password")
+		return
+	}
+
+	if err := h.memberStore.UpdatePassword(r.Context(), id, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update password")
+		return
+	}
+
+	if err := h.memberStore.SetMustChangePassword(r.Context(), id, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set password reset flag")
+		return
+	}
+
+	h.auditStore.Log(r.Context(), model.ActionPasswordReset, &id, nil, r.RemoteAddr, r.UserAgent(), map[string]string{
+		"target_username": member.Username,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"temporary_password": tempPassword,
+		"message":            "Password has been reset. Member must change it on next login.",
+	})
+}

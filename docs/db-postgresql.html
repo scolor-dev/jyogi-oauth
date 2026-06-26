@@ -58,8 +58,9 @@ Database: jyogi_oauth
     username      VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     email         VARCHAR(255) NOT NULL UNIQUE,
-    role          VARCHAR(50)  NOT NULL DEFAULT 'member',
-    is_active     BOOLEAN      NOT NULL DEFAULT true,
+    role                 VARCHAR(50)  NOT NULL DEFAULT 'member',
+    must_change_password BOOLEAN      NOT NULL DEFAULT false,
+    is_active            BOOLEAN      NOT NULL DEFAULT true,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
@@ -110,6 +111,12 @@ CREATE INDEX idx_members_role      ON auth.members (role);
 <td>VARCHAR(50)</td>
 <td>NOT NULL, DEFAULT 'member'</td>
 <td>ロール（member / moderator / admin）</td>
+</tr>
+<tr>
+<td>must_change_password</td>
+<td>BOOLEAN</td>
+<td>NOT NULL, DEFAULT false</td>
+<td>パスワードリセット後に true。次回ログイン時に変更を強制</td>
 </tr>
 <tr>
 <td>is_active</td>
@@ -504,6 +511,10 @@ CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
 <tr>
 <td><code>member_deactivated</code></td>
 <td>メンバー無効化</td>
+</tr>
+<tr>
+<td><code>password_reset</code></td>
+<td>管理者によるパスワードリセット（details に target_username を記録）</td>
 </tr>
 </tbody>
 </table>

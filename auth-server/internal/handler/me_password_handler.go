@@ -24,7 +24,7 @@ type changePasswordRequest struct {
 }
 
 func (h *MePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	memberID, ok := requireSession(w, r)
+	memberID, ok := requireSessionAllowForceChange(w, r)
 	if !ok {
 		return
 	}
@@ -65,6 +65,11 @@ func (h *MePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 
 	if err := h.memberStore.UpdatePassword(r.Context(), memberID, hash); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update password")
+		return
+	}
+
+	if err := h.memberStore.SetMustChangePassword(r.Context(), memberID, false); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear password reset flag")
 		return
 	}
 

@@ -21,8 +21,9 @@ CREATE TABLE auth.members (
     username      VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     email         VARCHAR(255) NOT NULL UNIQUE,
-    role          VARCHAR(50)  NOT NULL DEFAULT 'member',
-    is_active     BOOLEAN      NOT NULL DEFAULT true,
+    role                 VARCHAR(50)  NOT NULL DEFAULT 'member',
+    must_change_password BOOLEAN      NOT NULL DEFAULT false,
+    is_active            BOOLEAN      NOT NULL DEFAULT true,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
 

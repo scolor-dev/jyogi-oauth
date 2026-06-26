@@ -294,6 +294,18 @@ if ($request_method = OPTIONS) {
 </tr>
 </tbody>
 </table>
+
+<h3>管理者パスワードリセット</h3>
+<table>
+<thead><tr><th>項目</th><th>設計</th></tr></thead>
+<tbody>
+<tr><td>一時パスワード</td><td>12文字のランダム文字列（Base64url）。レスポンスで一度だけ表示</td></tr>
+<tr><td>強制変更</td><td><code>must_change_password = true</code> に設定。次回ログイン時にパスワード変更画面へ強制リダイレクト</td></tr>
+<tr><td>アクセス制限</td><td>パスワード変更完了まで <code>/oauth/me/password</code> と <code>/oauth/logout</code> 以外のセッション認証エンドポイントを403で拒否</td></tr>
+<tr><td>フロントガード</td><td>ルーターのナビゲーションガードで <code>/change-password</code> 以外への遷移をブロック</td></tr>
+<tr><td>監査</td><td><code>password_reset</code> アクションをログ記録（target_username を details に含む）</td></tr>
+</tbody>
+</table>
 <hr />
 <h2>Rate Limit</h2>
 <h3>ブルートフォース対策</h3>

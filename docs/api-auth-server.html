@@ -596,6 +596,16 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <h4>GET /oauth/admin/members/{id}</h4>
 <h4>PUT /oauth/admin/members/{id}</h4>
 <h4>DELETE /oauth/admin/members/{id}</h4>
+
+<h4><span class="method method-post">POST</span> /oauth/admin/members/{id}/reset-password</h4>
+<p>メンバーのパスワードをリセットし、一時パスワードを発行する。必要ロール: moderator 以上。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "temporary_password": "ランダム生成された一時パスワード",
+  "message": "Password has been reset. Member must change it on next login."
+}</code></pre>
+<p>一時パスワードはこのレスポンスでのみ表示。メンバーは次回ログイン時にパスワード変更を強制される（<code>must_change_password = true</code>）。</p>
+
 <h3>スコープ管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
 <p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。スコープは現在マイグレーションの初期データで管理。</p>
 <h4>GET /oauth/admin/scopes</h4>

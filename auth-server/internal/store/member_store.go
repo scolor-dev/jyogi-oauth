@@ -23,9 +23,9 @@ func (s *MemberStore) Create(ctx context.Context, username, passwordHash, email 
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO auth.members (username, password_hash, email)
 		 VALUES ($1, $2, $3)
-		 RETURNING id, username, password_hash, email, role, is_active, created_at, updated_at`,
+		 RETURNING id, username, password_hash, email, role, must_change_password, is_active, created_at, updated_at`,
 		username, passwordHash, email,
-	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
+	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.MustChangePassword, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert member: %w", err)
 	}
@@ -35,9 +35,9 @@ func (s *MemberStore) Create(ctx context.Context, username, passwordHash, email 
 func (s *MemberStore) GetByID(ctx context.Context, id uuid.UUID) (*model.Member, error) {
 	m := &model.Member{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, email, role, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, email, role, must_change_password, is_active, created_at, updated_at
 		 FROM auth.members WHERE id = $1`, id,
-	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
+	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.MustChangePassword, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -50,9 +50,9 @@ func (s *MemberStore) GetByID(ctx context.Context, id uuid.UUID) (*model.Member,
 func (s *MemberStore) GetByUsername(ctx context.Context, username string) (*model.Member, error) {
 	m := &model.Member{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, email, role, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, email, role, must_change_password, is_active, created_at, updated_at
 		 FROM auth.members WHERE username = $1`, username,
-	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
+	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.MustChangePassword, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -71,7 +71,7 @@ func (s *MemberStore) List(ctx context.Context, page, perPage int) ([]model.Memb
 
 	offset := (page - 1) * perPage
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, username, password_hash, email, role, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, email, role, must_change_password, is_active, created_at, updated_at
 		 FROM auth.members ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
 		perPage, offset,
 	)
@@ -83,7 +83,7 @@ func (s *MemberStore) List(ctx context.Context, page, perPage int) ([]model.Memb
 	var members []model.Member
 	for rows.Next() {
 		var m model.Member
-		if err := rows.Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.IsActive, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.MustChangePassword, &m.IsActive, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan member: %w", err)
 		}
 		members = append(members, m)
@@ -122,6 +122,14 @@ func (s *MemberStore) UpdatePassword(ctx context.Context, id uuid.UUID, password
 	_, err := s.pool.Exec(ctx, `UPDATE auth.members SET password_hash = $1 WHERE id = $2`, passwordHash, id)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
+func (s *MemberStore) SetMustChangePassword(ctx context.Context, id uuid.UUID, val bool) error {
+	_, err := s.pool.Exec(ctx, `UPDATE auth.members SET must_change_password = $1 WHERE id = $2`, val, id)
+	if err != nil {
+		return fmt.Errorf("set must_change_password: %w", err)
 	}
 	return nil
 }

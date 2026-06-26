@@ -150,6 +150,7 @@ func main() {
 	adminMembers.HandleFunc("GET /oauth/admin/members/{id}", adminMemberHandler.Get)
 	adminMembers.HandleFunc("PUT /oauth/admin/members/{id}", adminMemberHandler.Update)
 	adminMembers.HandleFunc("DELETE /oauth/admin/members/{id}", adminMemberHandler.Delete)
+	adminMembers.HandleFunc("POST /oauth/admin/members/{id}/reset-password", adminMemberHandler.ResetPassword)
 	mux.Handle("/oauth/admin/members", adminMiddleware.RequireModerator(adminMembers))
 	mux.Handle("/oauth/admin/members/", adminMiddleware.RequireModerator(adminMembers))
 
