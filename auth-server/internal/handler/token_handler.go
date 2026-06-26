@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -246,6 +247,10 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 
 	scope := tokenData.Scope
 	if reqScope := r.FormValue("scope"); reqScope != "" {
+		if !isSubsetScope(reqScope, tokenData.Scope) {
+			writeOAuthError(w, http.StatusBadRequest, "invalid_scope", "Requested scope exceeds the original grant")
+			return
+		}
 		scope = reqScope
 	}
 
@@ -363,6 +368,21 @@ func writeOAuthError(w http.ResponseWriter, status int, errorCode, description s
 		"error":             errorCode,
 		"error_description": description,
 	})
+}
+
+func isSubsetScope(requested, original string) bool {
+	originalSet := make(map[string]bool)
+	for _, s := range strings.Split(original, " ") {
+		if s != "" {
+			originalSet[s] = true
+		}
+	}
+	for _, s := range strings.Split(requested, " ") {
+		if s != "" && !originalSet[s] {
+			return false
+		}
+	}
+	return true
 }
 
 func mustParseUUID(s string) uuid.UUID {
