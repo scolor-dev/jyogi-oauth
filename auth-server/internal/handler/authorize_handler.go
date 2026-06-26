@@ -156,6 +156,11 @@ func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *ht
 		return
 	}
 
+	var authTime int64
+	if session := middleware.GetSession(r.Context()); session != nil {
+		authTime = session.CreatedAt
+	}
+
 	err = h.authCodeStore.Save(r.Context(), code, &store.AuthCodeData{
 		ClientID:            clientID,
 		MemberID:            memberID,
@@ -164,6 +169,7 @@ func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *ht
 		CodeChallenge:       codeChallenge,
 		Nonce:               nonce,
 		CodeChallengeMethod: codeChallengeMethod,
+		AuthTime:            authTime,
 	})
 	if err != nil {
 		httpRedirectWithError(w, r, redirectURI, state, "server_error", "Failed to store code")

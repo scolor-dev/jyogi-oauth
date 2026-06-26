@@ -1,10 +1,9 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -145,6 +144,7 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		MemberID: codeData.MemberID,
 		ClientID: clientID,
 		Scope:    codeData.Scope,
+		AuthTime: codeData.AuthTime,
 	})
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to save refresh token")
@@ -163,52 +163,44 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		"scope":         codeData.Scope,
 	}
 
-	if hasScope(codeData.Scope, "openid") {
+	if oauth.HasScope(codeData.Scope, "openid") {
 		idTokenClaims := oauth.IDTokenClaims{
 			MemberID:         codeData.MemberID,
 			ClientID:         clientID,
 			Nonce:            codeData.Nonce,
-			AuthTime:         time.Now().Unix(),
+			AuthTime:         codeData.AuthTime,
 			Scope:            codeData.Scope,
 			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
 		}
-		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(codeData.MemberID))
-		if idToken, err := h.jwtService.SignIDToken(idTokenClaims); err == nil {
-			resp["id_token"] = idToken
+		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(codeData.MemberID))
+		idToken, err := h.jwtService.SignIDToken(idTokenClaims)
+		if err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to sign id_token")
+			return
 		}
+		resp["id_token"] = idToken
 	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func hasScope(scopeStr, target string) bool {
-	for _, s := range strings.Split(scopeStr, " ") {
-		if s == target {
-			return true
-		}
+func applyIdentityClaims(ctx context.Context, pool *pgxpool.Pool, claims *oauth.IDTokenClaims, memberID uuid.UUID) {
+	ic := getIdentityClaims(ctx, pool, memberID)
+	if ic == nil {
+		return
 	}
-	return false
-}
-
-func (h *TokenHandler) fillIdentityClaims(r *http.Request, claims *oauth.IDTokenClaims, memberID uuid.UUID) {
-	var displayName, avatarURL, themeColor, tagline *string
-	_ = h.pool.QueryRow(r.Context(),
-		`SELECT display_name, avatar_url, theme_color, tagline FROM resource.member_identities WHERE member_id = $1`,
-		memberID,
-	).Scan(&displayName, &avatarURL, &themeColor, &tagline)
-
-	if displayName != nil {
-		claims.Name = *displayName
+	if ic.DisplayName != nil {
+		claims.Name = *ic.DisplayName
 	}
-	if avatarURL != nil {
-		claims.Picture = *avatarURL
+	if ic.AvatarURL != nil {
+		claims.Picture = *ic.AvatarURL
 	}
-	if themeColor != nil {
-		claims.Color = *themeColor
+	if ic.ThemeColor != nil {
+		claims.Color = *ic.ThemeColor
 	}
-	if tagline != nil {
-		claims.Tagline = *tagline
+	if ic.Tagline != nil {
+		claims.Tagline = *ic.Tagline
 	}
 }
 
@@ -284,6 +276,7 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		MemberID: tokenData.MemberID,
 		ClientID: clientID,
 		Scope:    scope,
+		AuthTime: tokenData.AuthTime,
 	})
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to save refresh token")
@@ -298,19 +291,22 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		"scope":         scope,
 	}
 
-	if hasScope(scope, "openid") {
+	if oauth.HasScope(scope, "openid") {
 		idTokenClaims := oauth.IDTokenClaims{
 			MemberID:         tokenData.MemberID,
 			ClientID:         clientID,
-			AuthTime:         time.Now().Unix(),
+			AuthTime:         tokenData.AuthTime,
 			Scope:            scope,
 			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
 		}
-		h.fillIdentityClaims(r, &idTokenClaims, mustParseUUID(tokenData.MemberID))
-		if idToken, err := h.jwtService.SignIDToken(idTokenClaims); err == nil {
-			resp["id_token"] = idToken
+		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(tokenData.MemberID))
+		idToken, err := h.jwtService.SignIDToken(idTokenClaims)
+		if err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to sign id_token")
+			return
 		}
+		resp["id_token"] = idToken
 	}
 
 	writeJSON(w, http.StatusOK, resp)

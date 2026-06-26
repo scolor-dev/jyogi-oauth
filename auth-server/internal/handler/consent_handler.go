@@ -145,6 +145,11 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 		scope = joinScopes(req.Scopes)
 	}
 
+	var authTime int64
+	if session.CreatedAt > 0 {
+		authTime = session.CreatedAt
+	}
+
 	err = h.authCodeStore.Save(r.Context(), code, &store.AuthCodeData{
 		ClientID:            params.ClientID,
 		MemberID:            memberID.String(),
@@ -153,6 +158,7 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge:       params.CodeChallenge,
 		CodeChallengeMethod: params.CodeChallengeMethod,
 		Nonce:               params.Nonce,
+		AuthTime:            authTime,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store code")

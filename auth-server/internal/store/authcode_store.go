@@ -17,6 +17,7 @@ type AuthCodeData struct {
 	CodeChallenge       string `json:"code_challenge"`
 	CodeChallengeMethod string `json:"code_challenge_method"`
 	Nonce               string `json:"nonce,omitempty"`
+	AuthTime            int64  `json:"auth_time,omitempty"`
 	IssuedAt            int64  `json:"issued_at"`
 }
 

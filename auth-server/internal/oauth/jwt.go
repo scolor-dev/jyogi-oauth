@@ -10,12 +10,17 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
+
+func HasScope(scopeStr, target string) bool {
+	return slices.Contains(strings.Fields(scopeStr), target)
+}
 
 type JWTService struct {
 	privateKey     *ecdsa.PrivateKey
@@ -178,8 +183,7 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 		mapClaims["nonce"] = claims.Nonce
 	}
 
-	scopes := splitScopes(claims.Scope)
-	if contains(scopes, "profile") {
+	if HasScope(claims.Scope, "profile") {
 		if claims.Name != "" {
 			mapClaims["name"] = claims.Name
 		}
@@ -187,7 +191,7 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 			mapClaims["preferred_username"] = claims.PreferredUsername
 		}
 	}
-	if contains(scopes, "identity") {
+	if HasScope(claims.Scope, "identity") {
 		if claims.Name != "" {
 			mapClaims["name"] = claims.Name
 		}
@@ -208,28 +212,9 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 	return token.SignedString(j.privateKey)
 }
 
-func splitScopes(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, " ") {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func computeAtHash(accessToken string) string {
 	h := sha256.Sum256([]byte(accessToken))
 	return base64.RawURLEncoding.EncodeToString(h[:16])
-}
-
-func contains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 func (j *JWTService) VerifyToken(tokenString string) (jwt.MapClaims, error) {

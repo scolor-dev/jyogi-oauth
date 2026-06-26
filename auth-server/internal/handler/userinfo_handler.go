@@ -49,43 +49,29 @@ func (h *UserInfoHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		"sub": member.ID.String(),
 	}
 
-	scopes := strings.Split(scope, " ")
-	scopeSet := make(map[string]bool)
-	for _, s := range scopes {
-		scopeSet[s] = true
-	}
-
-	if scopeSet["profile"] {
+	if oauth.HasScope(scope, "profile") {
 		resp["name"] = member.Username
 		resp["preferred_username"] = member.Username
+		resp["username"] = member.Username
 		resp["updated_at"] = member.UpdatedAt.Unix()
 	}
 
-	if scopeSet["identity"] {
-		var displayName, avatarURL, themeColor, tagline *string
-		err := h.pool.QueryRow(r.Context(),
-			`SELECT display_name, avatar_url, theme_color, tagline FROM resource.member_identities WHERE member_id = $1`,
-			memberID,
-		).Scan(&displayName, &avatarURL, &themeColor, &tagline)
-		if err == nil {
-			if displayName != nil {
-				resp["name"] = *displayName
+	if oauth.HasScope(scope, "identity") {
+		ic := getIdentityClaims(r.Context(), h.pool, memberID)
+		if ic != nil {
+			if ic.DisplayName != nil {
+				resp["name"] = *ic.DisplayName
 			}
-			if avatarURL != nil {
-				resp["picture"] = *avatarURL
+			if ic.AvatarURL != nil {
+				resp["picture"] = *ic.AvatarURL
 			}
-			if themeColor != nil {
-				resp["color"] = *themeColor
+			if ic.ThemeColor != nil {
+				resp["color"] = *ic.ThemeColor
 			}
-			if tagline != nil {
-				resp["tagline"] = *tagline
+			if ic.Tagline != nil {
+				resp["tagline"] = *ic.Tagline
 			}
 		}
-	}
-
-	if !scopeSet["profile"] && !scopeSet["identity"] {
-		resp["preferred_username"] = member.Username
-		resp["email"] = member.Email
 	}
 
 	writeJSON(w, http.StatusOK, resp)
