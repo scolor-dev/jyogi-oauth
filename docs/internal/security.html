@@ -174,6 +174,16 @@ if ($request_method = OPTIONS) {
 </tr>
 </tbody>
 </table>
+<h4>パスワード変更強制 (must_change_password)</h4>
+<p><code>must_change_password=true</code> のセッションは以下のエンドポイントでバックエンド側にブロックされる。フロントエンドのナビゲーションガードだけに依存しない。</p>
+<ul>
+<li><code>/oauth/authorize</code> — <code>/change-password</code> にリダイレクト</li>
+<li><code>/oauth/consent</code> — 403 で拒否</li>
+<li><code>/oauth/me/clients/*</code> — 403 で拒否</li>
+<li><code>/oauth/admin/*</code> — 403 で拒否</li>
+<li>その他 <code>requireSession</code> を使用する全エンドポイント — 403 で拒否</li>
+</ul>
+<p>アクセスが許可されるエンドポイント: <code>GET /oauth/me</code>、<code>PUT /oauth/me/password</code></p>
 <h3>セッション Cookie</h3>
 <pre><code>Set-Cookie: jyogi_sid={session_id};
     HttpOnly;

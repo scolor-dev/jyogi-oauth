@@ -33,6 +33,14 @@ func (m *AdminMiddleware) requireRole(next http.Handler, minRole string) http.Ha
 			return
 		}
 
+		session := GetSession(r.Context())
+		if session != nil && session.MustChangePassword {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": map[string]string{"code": "password_change_required", "message": "You must change your password before continuing"},
+			})
+			return
+		}
+
 		member, err := m.memberStore.GetByID(r.Context(), memberID)
 		if err != nil || member == nil || !member.IsActive {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{

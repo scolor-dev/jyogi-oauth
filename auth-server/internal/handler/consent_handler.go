@@ -93,6 +93,11 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if session.MustChangePassword {
+		writeError(w, http.StatusForbidden, "password_change_required", "You must change your password before continuing")
+		return
+	}
+
 	var req consentRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")

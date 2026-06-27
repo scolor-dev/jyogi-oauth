@@ -128,6 +128,11 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if session.MustChangePassword {
+		http.Redirect(w, r, "/change-password", http.StatusFound)
+		return
+	}
+
 	// Check existing consent
 	consent, err := h.consentStore.GetByMemberAndClient(r.Context(), memberID, client.ID)
 	if err != nil {
