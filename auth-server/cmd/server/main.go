@@ -91,7 +91,7 @@ func main() {
 	meHandler := handler.NewMeHandler(memberStore, sessionStore, pool, cfg.SessionCookieName)
 	meIdentityHandler := handler.NewMeIdentityHandler(pool)
 	meConsentHandler := handler.NewMeConsentHandler(consentStore, auditStore, pool)
-	mePasswordHandler := handler.NewMePasswordHandler(memberStore, auditStore, pwConfig)
+	mePasswordHandler := handler.NewMePasswordHandler(memberStore, sessionStore, auditStore, pwConfig)
 	meClientHandler := handler.NewMeClientHandler(clientStore, auditStore)
 
 	mux := http.NewServeMux()

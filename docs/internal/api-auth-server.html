@@ -767,6 +767,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 
 <h3><span class="method method-put">PUT</span> /oauth/me/password</h3>
 <p>自分のパスワードを変更する。現在のパスワードの確認が必要。</p>
+<p><code>must_change_password=true</code> のセッションでもアクセス可能。パスワード変更成功時、DB と Redis セッション両方の <code>must_change_password</code> を <code>false</code> に更新するため、再ログイン不要で通常操作に復帰できる。</p>
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   "current_password": "OldPass123",
