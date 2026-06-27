@@ -20,9 +20,14 @@ const tagline = ref('')
 
 // Client creation
 const showCreateClient = ref(false)
-const newClient = ref({ name: '', client_type: 'public', redirect_uris: '', description: '' })
+const newClient = ref({ name: '', client_type: 'public', redirect_uris: '', description: '', grant_types: ['authorization_code'] as string[] })
 const createdSecret = ref('')
 const clientError = ref('')
+
+// Client editing
+const editingClientId = ref<string | null>(null)
+const editClient = ref({ name: '', redirect_uris: '', grant_types: [] as string[] })
+const editError = ref('')
 
 onMounted(async () => {
   if (!auth.loaded) await auth.fetchMe()
@@ -97,17 +102,56 @@ async function createClient() {
       name: newClient.value.name,
       client_type: newClient.value.client_type,
       redirect_uris: uris,
-      allowed_grant_types: ['authorization_code'],
+      allowed_grant_types: newClient.value.grant_types,
       description: newClient.value.description || undefined,
     })
     if (res.client_secret) {
       createdSecret.value = res.client_secret
     }
-    newClient.value = { name: '', client_type: 'public', redirect_uris: '', description: '' }
+    newClient.value = { name: '', client_type: 'public', redirect_uris: '', description: '', grant_types: ['authorization_code'] }
     await loadClients()
     if (!res.client_secret) showCreateClient.value = false
   } catch (e: any) {
     clientError.value = e.message || 'Failed to create client'
+  }
+}
+
+function startEditClient(client: any) {
+  editingClientId.value = client.id
+  editClient.value = {
+    name: client.name,
+    redirect_uris: client.redirect_uris.join('\n'),
+    grant_types: [...client.allowed_grant_types],
+  }
+  editError.value = ''
+}
+
+function cancelEdit() {
+  editingClientId.value = null
+  editError.value = ''
+}
+
+async function saveEditClient(id: string) {
+  editError.value = ''
+  const uris = editClient.value.redirect_uris.split('\n').map(u => u.trim()).filter(Boolean)
+  if (!editClient.value.name || uris.length === 0) {
+    editError.value = 'Name and at least one redirect URI are required'
+    return
+  }
+  if (editClient.value.grant_types.length === 0) {
+    editError.value = 'At least one grant type is required'
+    return
+  }
+  try {
+    await api.updateClient(id, {
+      name: editClient.value.name,
+      redirect_uris: uris,
+      allowed_grant_types: editClient.value.grant_types,
+    })
+    editingClientId.value = null
+    await loadClients()
+  } catch (e: any) {
+    editError.value = e.message || 'Failed to update client'
   }
 }
 
@@ -227,6 +271,20 @@ const previewStyle = computed(() => ({
           <textarea v-model="newClient.redirect_uris" rows="3" placeholder="http://localhost:3000/callback"></textarea>
         </div>
         <div class="form-group">
+          <label>Grant Types</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" value="authorization_code" v-model="newClient.grant_types"> Authorization Code
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" value="client_credentials" v-model="newClient.grant_types"> Client Credentials
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" value="refresh_token" v-model="newClient.grant_types"> Refresh Token
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
           <label>Description (optional)</label>
           <input v-model="newClient.description" placeholder="What does this app do?">
         </div>
@@ -243,18 +301,57 @@ const previewStyle = computed(() => ({
 
       <!-- Client List -->
       <p v-if="!myClients.length && !showCreateClient" class="empty">No clients created yet</p>
-      <div v-for="client in myClients" :key="client.id" class="client-item">
-        <div class="client-info">
-          <div class="client-name">{{ client.name }}</div>
-          <div class="client-meta">
-            <code class="client-id">{{ client.client_id }}</code>
-            <span class="type-badge" :class="'type-' + client.client_type">{{ client.client_type }}</span>
+      <div v-for="client in myClients" :key="client.id" class="client-item-block">
+        <!-- Edit mode -->
+        <div v-if="editingClientId === client.id" class="edit-form">
+          <div class="form-group">
+            <label>Application Name</label>
+            <input v-model="editClient.name">
           </div>
-          <div class="client-uris">
-            <span v-for="uri in client.redirect_uris" :key="uri" class="uri-tag">{{ uri }}</span>
+          <div class="form-group">
+            <label>Redirect URIs (one per line)</label>
+            <textarea v-model="editClient.redirect_uris" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Grant Types</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" value="authorization_code" v-model="editClient.grant_types"> Authorization Code
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" value="client_credentials" v-model="editClient.grant_types"> Client Credentials
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" value="refresh_token" v-model="editClient.grant_types"> Refresh Token
+              </label>
+            </div>
+          </div>
+          <p v-if="editError" class="error-msg">{{ editError }}</p>
+          <div class="edit-actions">
+            <button class="btn-primary btn-sm" @click="saveEditClient(client.id)">Save</button>
+            <button class="btn-secondary btn-sm" @click="cancelEdit">Cancel</button>
           </div>
         </div>
-        <button class="btn-danger btn-sm" @click="deleteClient(client.id)">Delete</button>
+        <!-- View mode -->
+        <div v-else class="client-item">
+          <div class="client-info">
+            <div class="client-name">{{ client.name }}</div>
+            <div class="client-meta">
+              <code class="client-id">{{ client.client_id }}</code>
+              <span class="type-badge" :class="'type-' + client.client_type">{{ client.client_type }}</span>
+            </div>
+            <div class="client-grants">
+              <span v-for="gt in client.allowed_grant_types" :key="gt" class="grant-badge">{{ gt }}</span>
+            </div>
+            <div class="client-uris">
+              <span v-for="uri in client.redirect_uris" :key="uri" class="uri-tag">{{ uri }}</span>
+            </div>
+          </div>
+          <div class="client-actions">
+            <button class="btn-secondary btn-sm" @click="startEditClient(client)">Edit</button>
+            <button class="btn-danger btn-sm" @click="deleteClient(client.id)">Delete</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -360,4 +457,26 @@ select {
   background: #f0f0f0; color: #555; font-family: monospace;
 }
 .btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; }
+.btn-secondary { background: #e0e0e0; color: #333; border: none; border-radius: 6px; cursor: pointer; }
+.btn-secondary:hover { background: #d0d0d0; }
+
+.checkbox-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.checkbox-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { cursor: pointer; }
+
+.client-item-block { border-bottom: 1px solid #f0f0f0; }
+.client-item-block:last-child { border-bottom: none; }
+.client-grants { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.2rem; }
+.grant-badge {
+  display: inline-block; padding: 0.1rem 0.5rem; border-radius: 3px;
+  font-size: 0.7rem; background: #f3e5f5; color: #7b1fa2; font-family: monospace;
+}
+.client-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+.edit-form {
+  background: #f8f9fa; border-radius: 6px; padding: 1rem;
+  margin: 0.5rem 0; border: 1px solid #e0e0e0;
+}
+.edit-form .form-group { margin-bottom: 0.8rem; }
+.edit-actions { display: flex; gap: 0.5rem; }
 </style>
