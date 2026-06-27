@@ -712,6 +712,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 
 <h3><span class="method method-get">GET</span> /oauth/me</h3>
 <p>ログイン中のメンバー情報と Identity を取得する。</p>
+<p><code>must_change_password=true</code> のセッションでもアクセス可能。パスワード変更フロー中にフロントエンドがユーザー情報を取得するために必要。</p>
 <p><strong>成功レスポンス:</strong></p>
 <pre><code class="language-json">{
   "member": {

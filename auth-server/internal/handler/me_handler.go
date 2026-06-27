@@ -25,7 +25,7 @@ func NewMeHandler(memberStore *store.MemberStore, sessionStore *store.SessionSto
 }
 
 func (h *MeHandler) GetMe(w http.ResponseWriter, r *http.Request) {
-	memberID, ok := requireSession(w, r)
+	memberID, ok := requireSessionAllowForceChange(w, r)
 	if !ok {
 		return
 	}
