@@ -63,9 +63,9 @@
 <h2>JWT ペイロード（クレーム）</h2>
 <h3>アクセストークン</h3>
 <pre><code class="language-json">{
-  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;,
+  &quot;iss&quot;: &quot;https://jyogi-auth.scolor-dev.work&quot;,
   &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
-  &quot;aud&quot;: &quot;https://oauth.example.internal/api&quot;,
+  &quot;aud&quot;: &quot;https://jyogi-auth.scolor-dev.work/api&quot;,
   &quot;exp&quot;: 1719197300,
   &quot;iat&quot;: 1719196400,
   &quot;jti&quot;: &quot;a1b2c3d4-e5f6-7890-abcd-ef1234567890&quot;,
@@ -143,9 +143,9 @@
 <h3>Client Credentials Grant のアクセストークン</h3>
 <p>メンバー不在のため <code>sub</code> にクライアント ID を使用し、<code>username</code> は含まない。</p>
 <pre><code class="language-json">{
-  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;,
+  &quot;iss&quot;: &quot;https://jyogi-auth.scolor-dev.work&quot;,
   &quot;sub&quot;: &quot;my-service-app&quot;,
-  &quot;aud&quot;: &quot;https://oauth.example.internal/api&quot;,
+  &quot;aud&quot;: &quot;https://jyogi-auth.scolor-dev.work/api&quot;,
   &quot;exp&quot;: 1719197300,
   &quot;iat&quot;: 1719196400,
   &quot;jti&quot;: &quot;a1b2c3d4-e5f6-7890-abcd-ef1234567890&quot;,
@@ -180,7 +180,7 @@
 <h2>ID Token（OpenID Connect）</h2>
 <p><code>scope</code> に <code>openid</code> を含む場合、トークンレスポンスに <code>id_token</code> が追加される。ES256 で署名。</p>
 <pre><code class="language-json">{
-  "iss": "https://oauth.example.internal",
+  "iss": "https://jyogi-auth.scolor-dev.work",
   "sub": "550e8400-e29b-41d4-a716-446655440000",
   "aud": "my-app-client-id",
   "exp": 1719197300,
@@ -190,7 +190,7 @@
   "nonce": "random-nonce-from-client",
   "preferred_username": "tanaka",
   "name": "田中 太郎",
-  "picture": "https://cdn.example.internal/avatar.png",
+  "picture": "https://cdn.scolor-dev.work/avatar.png",
   "color": "#4A90D9",
   "tagline": "Engineer"
 }</code></pre>
