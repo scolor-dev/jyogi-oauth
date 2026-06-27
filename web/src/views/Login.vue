@@ -19,7 +19,7 @@ async function handleLogin() {
     const res = await api.login(username.value, password.value)
 
     if (res.redirect_to && res.redirect_to !== '/') {
-      if (res.redirect_to.startsWith('http')) {
+      if (res.redirect_to.startsWith('http') || res.redirect_to.startsWith('/oauth/')) {
         window.location.href = res.redirect_to
       } else {
         router.push(res.redirect_to)
