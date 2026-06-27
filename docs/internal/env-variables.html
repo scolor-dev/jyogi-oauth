@@ -132,7 +132,7 @@ Docker Compose では <code>.env.dev</code> / <code>.env.prod</code> ファイ�
 <tr>
 <td><code>AUTH_JWT_ISSUER</code></td>
 <td>No</td>
-<td><code>https://oauth.example.internal</code></td>
+<td><code>https://jyogi-auth.scolor-dev.work</code></td>
 <td>JWT の iss クレーム</td>
 </tr>
 </tbody>
@@ -195,7 +195,7 @@ Docker Compose では <code>.env.dev</code> / <code>.env.prod</code> ファイ�
 <td><code>AUTH_SESSION_COOKIE_DOMAIN</code></td>
 <td>No</td>
 <td>-</td>
-<td>Cookie のドメイン（例: <code>.example.internal</code>）</td>
+<td>Cookie のドメイン（例: <code>.scolor-dev.work</code>）</td>
 </tr>
 </tbody>
 </table>
@@ -376,7 +376,7 @@ Docker Compose では <code>.env.dev</code> / <code>.env.prod</code> ファイ�
 <tr>
 <td><code>RESOURCE_JWT_ISSUER</code></td>
 <td>No</td>
-<td><code>https://oauth.example.internal</code></td>
+<td><code>https://jyogi-auth.scolor-dev.work</code></td>
 <td>期待する JWT の iss クレーム</td>
 </tr>
 </tbody>
@@ -507,16 +507,16 @@ AUTH_DATABASE_URL=postgres://jyogi_auth:${AUTH_DB_PASSWORD}@postgres:5432/jyogi_
 AUTH_REDIS_URL=redis://redis:6379/0
 AUTH_JWT_PRIVATE_KEY_PATH=/keys/private.pem
 AUTH_JWT_PUBLIC_KEY_PATH=/keys/public.pem
-AUTH_JWT_ISSUER=https://oauth.example.internal
+AUTH_JWT_ISSUER=https://jyogi-auth.scolor-dev.work
 AUTH_SESSION_COOKIE_SECURE=true
-AUTH_SESSION_COOKIE_DOMAIN=.example.internal
+AUTH_SESSION_COOKIE_DOMAIN=.scolor-dev.work
 AUTH_LOG_LEVEL=info
 
 # リソースサーバー
 RESOURCE_SERVER_PORT=8081
 RESOURCE_DATABASE_URL=postgres://jyogi_resource:${RESOURCE_DB_PASSWORD}@postgres:5432/jyogi_oauth?search_path=resource
 RESOURCE_JWKS_URL=http://auth-server:8080/oauth/jwks
-RESOURCE_JWT_ISSUER=https://oauth.example.internal
+RESOURCE_JWT_ISSUER=https://jyogi-auth.scolor-dev.work
 RESOURCE_LOG_LEVEL=info
 </code></pre>
 <p>※ <code>.env.prod</code> は <code>.gitignore</code> に追加し、Git にコミットしないこと。</p>

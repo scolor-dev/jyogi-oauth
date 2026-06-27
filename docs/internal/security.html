@@ -92,7 +92,7 @@ real_ip_header CF-Connecting-IP;
 map $http_origin $cors_origin {
     default "";
     "~^https?://localhost(:[0-9]+)?$" $http_origin;
-    "~^https://([a-z0-9-]+\.)?example\.internal$" $http_origin;
+    "~^https://([a-z0-9-]+\.)?scolor-dev\.work$" $http_origin;
 }
 
 # 各 location ブロック内
@@ -120,7 +120,7 @@ if ($request_method = OPTIONS) {
 <tbody>
 <tr>
 <td>Allow-Origin</td>
-<td><code>localhost:*</code> + <code>*.example.internal</code></td>
+<td><code>localhost:*</code> + <code>*.scolor-dev.work</code></td>
 <td>map ディレクティブで動的に許可</td>
 </tr>
 <tr>
@@ -190,7 +190,7 @@ if ($request_method = OPTIONS) {
     Secure;
     SameSite=Lax;
     Path=/oauth;
-    Domain=.example.internal;
+    Domain=.scolor-dev.work;
     Max-Age=86400
 </code></pre>
 <table>
@@ -224,7 +224,7 @@ if ($request_method = OPTIONS) {
 </tr>
 <tr>
 <td>Domain</td>
-<td>.example.internal</td>
+<td>.scolor-dev.work</td>
 <td>サブドメイン間で共有</td>
 </tr>
 </tbody>
@@ -506,9 +506,9 @@ Retry-After: 30
 </tbody>
 </table>
 <h3>redirect_uri の検証</h3>
-<pre><code>登録済み: https://app.example.internal/callback
-リクエスト: https://app.example.internal/callback  → OK
-リクエスト: https://app.example.internal/callback?  → NG
+<pre><code>登録済み: https://app.scolor-dev.work/callback
+リクエスト: https://app.scolor-dev.work/callback  → OK
+リクエスト: https://app.scolor-dev.work/callback?  → NG
 リクエスト: https://evil.example.com/callback       → NG
 </code></pre>
 <hr />

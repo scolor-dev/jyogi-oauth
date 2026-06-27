@@ -23,7 +23,7 @@
 <h1>リソースサーバー API 設計</h1>
 <h2>ベース URL</h2>
 <pre><code>http://127.0.0.1:8081
-Nginx 経由: https://oauth.example.internal/api/*
+Nginx 経由: https://jyogi-api.scolor-dev.work/api/*
 </code></pre>
 <hr />
 <h2>認証・認可（共通）</h2>
@@ -118,7 +118,7 @@ Retry-After: 30
 <pre><code class="language-json">{
   &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
   &quot;display_name&quot;: &quot;田中 太郎&quot;,
-  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.scolor-dev.work/avatars/550e8400.png&quot;,
   &quot;theme_color&quot;: &quot;#4A90D9&quot;,
   &quot;tagline&quot;: &quot;部長&quot;,
   &quot;updated_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
@@ -138,7 +138,7 @@ Retry-After: 30
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   &quot;display_name&quot;: &quot;田中 太郎&quot;,
-  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.scolor-dev.work/avatars/550e8400.png&quot;,
   &quot;theme_color&quot;: &quot;#4A90D9&quot;,
   &quot;tagline&quot;: &quot;部長&quot;
 }
@@ -176,7 +176,7 @@ Retry-After: 30
 {
   &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
   &quot;display_name&quot;: &quot;田中 太郎&quot;,
-  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.scolor-dev.work/avatars/550e8400.png&quot;,
   &quot;theme_color&quot;: &quot;#4A90D9&quot;,
   &quot;tagline&quot;: &quot;部長&quot;,
   &quot;updated_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
@@ -188,7 +188,7 @@ Retry-After: 30
 {
   &quot;member_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
   &quot;display_name&quot;: &quot;田中 太郎（更新）&quot;,
-  &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/550e8400.png&quot;,
+  &quot;avatar_url&quot;: &quot;https://cdn.scolor-dev.work/avatars/550e8400.png&quot;,
   &quot;theme_color&quot;: &quot;#FF5733&quot;,
   &quot;tagline&quot;: &quot;元部長&quot;,
   &quot;updated_at&quot;: &quot;2026-06-24T10:00:00Z&quot;
@@ -244,7 +244,7 @@ Retry-After: 30
     {
       &quot;member_id&quot;: &quot;uuid-1&quot;,
       &quot;display_name&quot;: &quot;田中 太郎&quot;,
-      &quot;avatar_url&quot;: &quot;https://cdn.example.internal/avatars/uuid-1.png&quot;,
+      &quot;avatar_url&quot;: &quot;https://cdn.scolor-dev.work/avatars/uuid-1.png&quot;,
       &quot;theme_color&quot;: &quot;#4A90D9&quot;,
       &quot;tagline&quot;: &quot;部長&quot;
     },

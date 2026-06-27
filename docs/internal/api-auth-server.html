@@ -23,18 +23,18 @@
 <h1>認可サーバー API 設計</h1>
 <h2>ベース URL</h2>
 <pre><code>http://127.0.0.1:8080
-Nginx 経由: https://oauth.example.internal/oauth/*
+本番: https://jyogi-auth.scolor-dev.work/oauth/*
 </code></pre>
 <hr />
 <h2>OpenID Connect Discovery</h2>
 <h3><span class="method method-get">GET</span> /.well-known/openid-configuration</h3>
 <p>OIDC ディスカバリドキュメント。クライアントライブラリの自動設定に使用。</p>
 <pre><code class="language-json">{
-  "issuer": "https://oauth.example.internal",
-  "authorization_endpoint": "https://oauth.example.internal/oauth/authorize",
-  "token_endpoint": "https://oauth.example.internal/oauth/token",
-  "userinfo_endpoint": "https://oauth.example.internal/oauth/userinfo",
-  "jwks_uri": "https://oauth.example.internal/oauth/jwks",
+  "issuer": "https://jyogi-auth.scolor-dev.work",
+  "authorization_endpoint": "https://jyogi-auth.scolor-dev.work/oauth/authorize",
+  "token_endpoint": "https://jyogi-auth.scolor-dev.work/oauth/token",
+  "userinfo_endpoint": "https://jyogi-auth.scolor-dev.work/oauth/userinfo",
+  "jwks_uri": "https://jyogi-auth.scolor-dev.work/oauth/jwks",
   "scopes_supported": ["openid", "profile", "identity", "identity:write", "read", "write"],
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
@@ -424,7 +424,7 @@ Content-Type: application/json
   &quot;exp&quot;: 1719200000,
   &quot;iat&quot;: 1719196400,
   &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
-  &quot;iss&quot;: &quot;https://oauth.example.internal&quot;
+  &quot;iss&quot;: &quot;https://jyogi-auth.scolor-dev.work&quot;
 }
 </code></pre>
 <p><strong>成功レスポンス（無効）:</strong></p>
@@ -474,7 +474,7 @@ Content-Type: application/json
   "name": "田中 太郎",
   "preferred_username": "tanaka",
   "updated_at": 1719200000,
-  "picture": "https://cdn.example.internal/avatar.png",
+  "picture": "https://cdn.scolor-dev.work/avatar.png",
   "color": "#4A90D9",
   "tagline": "Engineer"
 }</code></pre>
@@ -633,7 +633,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <pre><code class="language-json">{
   &quot;username&quot;: &quot;tanaka&quot;,
   &quot;password&quot;: &quot;initial_password&quot;,
-  &quot;email&quot;: &quot;tanaka@example.internal&quot;,
+  &quot;email&quot;: &quot;tanaka@scolor-dev.work&quot;,
   &quot;name&quot;: &quot;田中 太郎&quot;
 }
 </code></pre>
@@ -725,7 +725,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   "member": {
     "id": "uuid",
     "username": "tanaka",
-    "email": "tanaka@example.internal",
+    "email": "tanaka@scolor-dev.work",
     "role": "member",
     "is_active": true,
     "created_at": "...",
