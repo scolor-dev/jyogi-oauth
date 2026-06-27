@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
 
@@ -72,3 +73,8 @@ func (m *AdminMiddleware) requireRole(next http.Handler, minRole string) http.Ha
 type adminContextKey string
 
 const adminMemberKey adminContextKey = "admin_member"
+
+func GetAdminMember(ctx context.Context) *model.Member {
+	m, _ := ctx.Value(adminMemberKey).(*model.Member)
+	return m
+}

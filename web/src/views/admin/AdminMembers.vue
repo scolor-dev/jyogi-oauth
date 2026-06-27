@@ -81,6 +81,21 @@ async function toggleActive(member: any) {
     await loadMembers()
   } catch {}
 }
+
+const roleLevels: Record<string, number> = { admin: 3, moderator: 2, member: 1 }
+
+function canManage(target: any): boolean {
+  const me = auth.member
+  if (!me || me.id === target.id) return false
+  if (target.username === 'root') return false
+  return (roleLevels[me.role] || 0) > (roleLevels[target.role] || 0)
+}
+
+function canEditRole(target: any): boolean {
+  const me = auth.member
+  if (!me || me.role !== 'admin') return false
+  return canManage(target)
+}
 </script>
 
 <template>
@@ -137,7 +152,7 @@ async function toggleActive(member: any) {
           <td><strong>{{ m.username }}</strong></td>
           <td>{{ m.email }}</td>
           <td>
-            <template v-if="editingId === m.id && auth.member?.role === 'admin'">
+            <template v-if="editingId === m.id && canEditRole(m)">
               <select v-model="editRole" class="role-select">
                 <option value="member">member</option>
                 <option value="moderator">moderator</option>
@@ -148,7 +163,7 @@ async function toggleActive(member: any) {
             </template>
             <template v-else>
               <span class="role-badge" :class="'role-' + m.role">{{ m.role }}</span>
-              <button v-if="auth.member?.role === 'admin' && m.username !== 'root'"
+              <button v-if="canEditRole(m)"
                 class="btn-sm btn-outline edit-btn" @click="startEditRole(m)">Edit</button>
             </template>
           </td>
@@ -159,9 +174,9 @@ async function toggleActive(member: any) {
           </td>
           <td>{{ new Date(m.created_at).toLocaleDateString('ja-JP') }}</td>
           <td class="actions-cell">
-            <button v-if="m.username !== 'root'" class="btn-sm btn-outline"
+            <button v-if="canManage(m)" class="btn-sm btn-outline"
               @click="resetPassword(m)">Reset PW</button>
-            <button v-if="m.username !== 'root'" class="btn-sm"
+            <button v-if="canManage(m)" class="btn-sm"
               :class="m.is_active ? 'btn-danger' : 'btn-primary'"
               @click="toggleActive(m)">
               {{ m.is_active ? 'Disable' : 'Enable' }}

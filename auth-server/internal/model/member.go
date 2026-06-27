@@ -28,3 +28,21 @@ type Member struct {
 
 func (m *Member) IsAdmin() bool     { return m.Role == RoleAdmin }
 func (m *Member) IsModerator() bool { return m.Role == RoleModerator || m.Role == RoleAdmin }
+func (m *Member) IsRoot() bool      { return m.Username == "root" }
+
+func RoleLevel(role string) int {
+	switch role {
+	case RoleAdmin:
+		return 3
+	case RoleModerator:
+		return 2
+	case RoleMember:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func CanManage(operatorRole, targetRole string) bool {
+	return RoleLevel(operatorRole) > RoleLevel(targetRole)
+}
