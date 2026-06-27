@@ -35,8 +35,18 @@
   <span class="step-title">前提</span>
 </div>
 <p>jyogi-oauth が <code>http://localhost</code> で稼働していること。ダッシュボードにログインできるアカウントがあること。</p>
-<pre><code class="language-bash"># ヘルスチェック
-curl http://localhost/oauth/health</code></pre>
+<pre><code class="language-bash"># ヘルスチェック（ローカル）
+curl http://localhost/oauth/health
+
+# ヘルスチェック（本番）
+curl https://jyogi-auth.scolor-dev.work/oauth/health</code></pre>
+
+<p class="note"><strong>本番環境のドメイン構成:</strong><br>
+<code>jyogi-oauth.scolor-dev.work</code> — SPA（ダッシュボード・ログイン画面）+ API プロキシ<br>
+<code>jyogi-auth.scolor-dev.work</code> — 認可サーバー API 直接<br>
+<code>jyogi-api.scolor-dev.work</code> — リソースサーバー API 直接<br>
+<br>
+ローカル開発では <code>http://localhost</code> に全て集約されるため、この区別は不要です。</p>
 </div>
 
 <hr>
@@ -195,8 +205,30 @@ curl -H "Authorization: Bearer ACCESS_TOKEN" \
 
 <h2>OIDC Discovery</h2>
 <p>クライアントライブラリの自動設定に使えます:</p>
-<pre><code class="language-bash">curl http://localhost/.well-known/openid-configuration</code></pre>
+<pre><code class="language-bash">curl http://localhost/.well-known/openid-configuration
+
+# 本番
+curl https://jyogi-auth.scolor-dev.work/.well-known/openid-configuration</code></pre>
 <p>エンドポイント URL、対応スコープ、署名アルゴリズム等が JSON で返されます。</p>
+
+<hr>
+
+<h2>本番環境のエンドポイント使い分け</h2>
+<p>本番環境ではドメインが分離されています。認可エンドポイントはログイン UI が必要なため、<strong>必ず SPA ドメインを使用</strong>してください。</p>
+
+<table>
+<thead><tr><th>用途</th><th>ドメイン</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td><code>/oauth/authorize</code></td><td><code>jyogi-oauth.scolor-dev.work</code></td><td>ログイン画面・同意画面の表示が必要</td></tr>
+<tr><td><code>/oauth/token</code></td><td><code>jyogi-auth.scolor-dev.work</code></td><td>サーバー間通信、UI 不要</td></tr>
+<tr><td><code>/oauth/jwks</code></td><td><code>jyogi-auth.scolor-dev.work</code></td><td>JWT 検証用公開鍵の取得</td></tr>
+<tr><td><code>/oauth/userinfo</code></td><td><code>jyogi-auth.scolor-dev.work</code></td><td>Bearer トークンで呼ぶ API</td></tr>
+<tr><td><code>/oauth/revoke</code></td><td><code>jyogi-auth.scolor-dev.work</code></td><td>サーバー間通信、UI 不要</td></tr>
+<tr><td><code>/api/v1/*</code></td><td><code>jyogi-api.scolor-dev.work</code></td><td>リソースサーバー API</td></tr>
+</tbody>
+</table>
+
+<p class="note"><strong>注意:</strong> <code>/oauth/authorize</code> を <code>jyogi-auth.scolor-dev.work</code> に向けると、未ログイン時のリダイレクト先（<code>/login</code>）が 404 になります。認可エンドポイントは必ず <code>jyogi-oauth.scolor-dev.work</code> を使ってください。</p>
 
 <hr>
 
