@@ -17,7 +17,6 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await api.login(username.value, password.value)
-    await auth.fetchMe()
 
     if (res.redirect_to && res.redirect_to !== '/') {
       if (res.redirect_to.startsWith('http')) {
@@ -25,9 +24,11 @@ async function handleLogin() {
       } else {
         router.push(res.redirect_to)
       }
-    } else {
-      router.push('/dashboard')
+      return
     }
+
+    await auth.fetchMe()
+    router.push('/dashboard')
   } catch (e: any) {
     error.value = e.message || 'Login failed'
   } finally {
