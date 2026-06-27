@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>認可サーバー API 設計</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../style.css">
 </head>
 <body>
 <nav>
 <ul>
-<li><a href="index.html">Index</a></li>
+<li><a href="../index.html">Index</a></li>
 <li><a href="architecture.html">設計書</a></li>
 <li><a href="api-auth-server.html">認可サーバー API</a></li>
 <li><a href="api-resource-server.html">リソースサーバー API</a></li>
@@ -25,6 +25,24 @@
 <pre><code>http://127.0.0.1:8080
 Nginx 経由: https://oauth.example.internal/oauth/*
 </code></pre>
+<hr />
+<h2>OpenID Connect Discovery</h2>
+<h3><span class="method method-get">GET</span> /.well-known/openid-configuration</h3>
+<p>OIDC ディスカバリドキュメント。クライアントライブラリの自動設定に使用。</p>
+<pre><code class="language-json">{
+  "issuer": "https://oauth.example.internal",
+  "authorization_endpoint": "https://oauth.example.internal/oauth/authorize",
+  "token_endpoint": "https://oauth.example.internal/oauth/token",
+  "userinfo_endpoint": "https://oauth.example.internal/oauth/userinfo",
+  "jwks_uri": "https://oauth.example.internal/oauth/jwks",
+  "scopes_supported": ["openid", "profile", "identity", "identity:write", "read", "write"],
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["ES256"],
+  "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]
+}</code></pre>
+<p><strong>キャッシュ:</strong> <code>Cache-Control: public, max-age=86400</code></p>
 <hr />
 <h2>ヘルスチェック</h2>
 <h3><span class="method method-get">GET</span> /oauth/health</h3>
@@ -85,6 +103,11 @@ Nginx 経由: https://oauth.example.internal/oauth/*
 <td>code_challenge_method</td>
 <td>Yes</td>
 <td><code>S256</code> 固定</td>
+</tr>
+<tr>
+<td>nonce</td>
+<td>No</td>
+<td>OIDC: リプレイ攻撃防止用。<code>id_token</code> にそのまま含まれる</td>
 </tr>
 </tbody>
 </table>
@@ -195,9 +218,11 @@ Cache-Control: no-store
   &quot;token_type&quot;: &quot;Bearer&quot;,
   &quot;expires_in&quot;: 900,
   &quot;refresh_token&quot;: &quot;dGhpcyBpcyBhIHJlZnJlc2g...&quot;,
-  &quot;scope&quot;: &quot;read write&quot;
+  &quot;scope&quot;: &quot;openid identity profile&quot;,
+  &quot;id_token&quot;: &quot;eyJhbGciOiJFUzI1NiIs...&quot;
 }
 </code></pre>
+<p><code>id_token</code> は <code>scope</code> に <code>openid</code> を含む場合のみ返却。含まない場合は従来の OAuth 2.0 レスポンス。</p>
 <h4>Grant Type: refresh_token</h4>
 <p><strong>リクエストボディ:</strong></p>
 <table>
@@ -415,31 +440,44 @@ Content-Type: application/json
 <pre><code class="language-json">{
   &quot;keys&quot;: [
     {
-      &quot;kty&quot;: &quot;RSA&quot;,
+      &quot;kty&quot;: &quot;EC&quot;,
       &quot;use&quot;: &quot;sig&quot;,
-      &quot;kid&quot;: &quot;key-2024-01&quot;,
-      &quot;alg&quot;: &quot;RS256&quot;,
-      &quot;n&quot;: &quot;0vx7agoebGcQ...&quot;,
-      &quot;e&quot;: &quot;AQAB&quot;
+      &quot;kid&quot;: &quot;key-1&quot;,
+      &quot;alg&quot;: &quot;ES256&quot;,
+      &quot;crv&quot;: &quot;P-256&quot;,
+      &quot;x&quot;: &quot;f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU&quot;,
+      &quot;y&quot;: &quot;x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0&quot;
     }
   ]
 }
 </code></pre>
 <p><strong>キャッシュ:</strong> <code>Cache-Control: public, max-age=3600</code></p>
 <hr />
-<h2>メンバー情報</h2>
-<h3>GET /oauth/userinfo</h3>
-<p>アクセストークンに紐づくメンバー情報を返す。</p>
+<h2>UserInfo（OIDC）</h2>
+<h3><span class="method method-get">GET</span> /oauth/userinfo</h3>
+<p>アクセストークンに紐づくメンバー情報を返す。返却するクレームは scope に応じて変化。</p>
 <p><strong>認証:</strong> <code>Authorization: Bearer {access_token}</code></p>
-<p><strong>必要スコープ:</strong> <code>openid</code>（または <code>profile</code>）</p>
-<p><strong>成功レスポンス:</strong></p>
+
+<h4>スコープとクレームの対応</h4>
+<table>
+<thead><tr><th>スコープ</th><th>返却するクレーム</th></tr></thead>
+<tbody>
+<tr><td><code>openid</code></td><td><code>sub</code></td></tr>
+<tr><td><code>profile</code></td><td><code>name</code>, <code>preferred_username</code>, <code>updated_at</code></td></tr>
+<tr><td><code>identity</code></td><td><code>name</code>, <code>picture</code>, <code>color</code>, <code>tagline</code></td></tr>
+</tbody>
+</table>
+
+<p><strong>レスポンス例（scope: openid identity profile）:</strong></p>
 <pre><code class="language-json">{
-  &quot;sub&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
-  &quot;username&quot;: &quot;tanaka&quot;,
-  &quot;email&quot;: &quot;tanaka@example.internal&quot;,
-  &quot;name&quot;: &quot;田中 太郎&quot;
-}
-</code></pre>
+  "sub": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "田中 太郎",
+  "preferred_username": "tanaka",
+  "updated_at": 1719200000,
+  "picture": "https://cdn.example.internal/avatar.png",
+  "color": "#4A90D9",
+  "tagline": "Engineer"
+}</code></pre>
 <p><strong>エラーレスポンス:</strong></p>
 <pre><code>HTTP/1.1 401 Unauthorized
 WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
@@ -474,7 +512,6 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <p>同意フォームからのリクエストを処理する。</p>
 <p><strong>リクエストボディ（JSON）:</strong></p>
 <pre><code class="language-json">{
-  &quot;consent_id&quot;: &quot;session-stored-id&quot;,
   &quot;approved&quot;: true,
   &quot;scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
 }
@@ -495,6 +532,13 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 </tbody>
 </table>
 <p>ロール変更（<code>PUT /oauth/admin/members/{id}</code> の <code>role</code> フィールド）は admin のみ実行可能。</p>
+<h4>権限階層チェック</h4>
+<p>変更操作（PUT / DELETE / reset-password）は以下の制約を受ける:</p>
+<ul>
+<li><strong>root 保護</strong>: 対象が root ユーザーの場合、全変更操作を 403 で拒否</li>
+<li><strong>自己操作禁止</strong>: 操作者と対象が同一の場合、403 で拒否（<code>/oauth/me/*</code> を使用）</li>
+<li><strong>権限階層</strong>: 操作者は自分より下位のロールのみ管理可能（admin → moderator/member、moderator → member）</li>
+</ul>
 <h3>クライアント管理</h3>
 <h4>GET /oauth/admin/clients</h4>
 <p>クライアント一覧を取得する。</p>
@@ -529,7 +573,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
       &quot;name&quot;: &quot;My Application&quot;,
       &quot;client_type&quot;: &quot;confidential&quot;,
       &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-      &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+      &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
       &quot;is_active&quot;: true,
       &quot;created_at&quot;: &quot;2026-01-15T09:00:00Z&quot;
     }
@@ -546,7 +590,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;name&quot;: &quot;My Application&quot;,
   &quot;client_type&quot;: &quot;confidential&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;]
 }
 </code></pre>
 <p><strong>成功レスポンス:</strong></p>
@@ -559,7 +603,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;name&quot;: &quot;My Application&quot;,
   &quot;client_type&quot;: &quot;confidential&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
   &quot;is_active&quot;: true,
   &quot;created_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
 }
@@ -573,7 +617,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;Updated App Name&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;, &quot;https://my-app.example/callback2&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;, &quot;admin&quot;],
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;, &quot;refresh_token&quot;],
   &quot;is_active&quot;: true
 }
 </code></pre>
@@ -596,6 +640,16 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <h4>GET /oauth/admin/members/{id}</h4>
 <h4>PUT /oauth/admin/members/{id}</h4>
 <h4>DELETE /oauth/admin/members/{id}</h4>
+
+<h4><span class="method method-post">POST</span> /oauth/admin/members/{id}/reset-password</h4>
+<p>メンバーのパスワードをリセットし、一時パスワードを発行する。必要ロール: moderator 以上。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "temporary_password": "ランダム生成された一時パスワード",
+  "message": "Password has been reset. Member must change it on next login."
+}</code></pre>
+<p>一時パスワードはこのレスポンスでのみ表示。メンバーは次回ログイン時にパスワード変更を強制される（<code>must_change_password = true</code>）。</p>
+
 <h3>スコープ管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
 <p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。スコープは現在マイグレーションの初期データで管理。</p>
 <h4>GET /oauth/admin/scopes</h4>
@@ -665,6 +719,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 
 <h3><span class="method method-get">GET</span> /oauth/me</h3>
 <p>ログイン中のメンバー情報と Identity を取得する。</p>
+<p><code>must_change_password=true</code> のセッションでもアクセス可能。パスワード変更フロー中にフロントエンドがユーザー情報を取得するために必要。</p>
 <p><strong>成功レスポンス:</strong></p>
 <pre><code class="language-json">{
   "member": {
@@ -719,6 +774,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 
 <h3><span class="method method-put">PUT</span> /oauth/me/password</h3>
 <p>自分のパスワードを変更する。現在のパスワードの確認が必要。</p>
+<p><code>must_change_password=true</code> のセッションでもアクセス可能。パスワード変更成功時、DB と Redis セッション両方の <code>must_change_password</code> を <code>false</code> に更新するため、再ログイン不要で通常操作に復帰できる。</p>
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   "current_password": "OldPass123",

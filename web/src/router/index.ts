@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -24,6 +25,11 @@ const router = createRouter({
       component: () => import('../views/Dashboard.vue'),
     },
     {
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('../views/ChangePassword.vue'),
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('../views/admin/Admin.vue'),
@@ -46,6 +52,19 @@ const router = createRouter({
       ],
     },
   ],
+})
+
+const allowedWhileForceChange = ['change-password', 'login', 'home']
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  if (!auth.loaded) await auth.fetchMe()
+
+  if (auth.isLoggedIn() && auth.mustChangePassword()) {
+    if (!allowedWhileForceChange.includes(to.name as string)) {
+      return { name: 'change-password' }
+    }
+  }
 })
 
 export default router

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
 
@@ -29,6 +30,14 @@ func (m *AdminMiddleware) requireRole(next http.Handler, minRole string) http.Ha
 		if !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"error": map[string]string{"code": "unauthorized", "message": "Not logged in"},
+			})
+			return
+		}
+
+		session := GetSession(r.Context())
+		if session != nil && session.MustChangePassword {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": map[string]string{"code": "password_change_required", "message": "You must change your password before continuing"},
 			})
 			return
 		}
@@ -64,3 +73,8 @@ func (m *AdminMiddleware) requireRole(next http.Handler, minRole string) http.Ha
 type adminContextKey string
 
 const adminMemberKey adminContextKey = "admin_member"
+
+func GetAdminMember(ctx context.Context) *model.Member {
+	m, _ := ctx.Value(adminMemberKey).(*model.Member)
+	return m
+}

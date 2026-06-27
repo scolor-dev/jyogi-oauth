@@ -16,6 +16,8 @@ const createError = ref('')
 
 const editingId = ref<string | null>(null)
 const editRole = ref('')
+const tempPassword = ref('')
+const tempPasswordFor = ref('')
 
 onMounted(() => loadMembers())
 
@@ -61,6 +63,16 @@ async function saveRole(id: string) {
   } catch {}
 }
 
+async function resetPassword(member: any) {
+  if (!confirm(`${member.username} のパスワードをリセットしますか？`)) return
+  tempPassword.value = ''
+  try {
+    const res = await api.admin.resetPassword(member.id)
+    tempPassword.value = res.temporary_password
+    tempPasswordFor.value = member.username
+  } catch {}
+}
+
 async function toggleActive(member: any) {
   const action = member.is_active ? 'このメンバーを無効化しますか？' : 'このメンバーを有効化しますか？'
   if (!confirm(action)) return
@@ -68,6 +80,21 @@ async function toggleActive(member: any) {
     await api.admin.updateMember(member.id, { is_active: !member.is_active })
     await loadMembers()
   } catch {}
+}
+
+const roleLevels: Record<string, number> = { admin: 3, moderator: 2, member: 1 }
+
+function canManage(target: any): boolean {
+  const me = auth.member
+  if (!me || me.id === target.id) return false
+  if (target.username === 'root') return false
+  return (roleLevels[me.role] || 0) > (roleLevels[target.role] || 0)
+}
+
+function canEditRole(target: any): boolean {
+  const me = auth.member
+  if (!me || me.role !== 'admin') return false
+  return canManage(target)
 }
 </script>
 
@@ -103,6 +130,12 @@ async function toggleActive(member: any) {
     <div v-if="error" class="error-msg">{{ error }}</div>
     <div v-if="loading" class="loading">Loading...</div>
 
+    <div v-if="tempPassword" class="temp-password-alert">
+      <p><strong>{{ tempPasswordFor }}</strong> の一時パスワード（一度だけ表示）:</p>
+      <code class="temp-password-code">{{ tempPassword }}</code>
+      <button class="btn-sm btn-outline" @click="tempPassword = ''">閉じる</button>
+    </div>
+
     <table v-if="!loading && members.length" class="data-table">
       <thead>
         <tr>
@@ -119,7 +152,7 @@ async function toggleActive(member: any) {
           <td><strong>{{ m.username }}</strong></td>
           <td>{{ m.email }}</td>
           <td>
-            <template v-if="editingId === m.id && auth.member?.role === 'admin'">
+            <template v-if="editingId === m.id && canEditRole(m)">
               <select v-model="editRole" class="role-select">
                 <option value="member">member</option>
                 <option value="moderator">moderator</option>
@@ -130,7 +163,7 @@ async function toggleActive(member: any) {
             </template>
             <template v-else>
               <span class="role-badge" :class="'role-' + m.role">{{ m.role }}</span>
-              <button v-if="auth.member?.role === 'admin' && m.username !== 'root'"
+              <button v-if="canEditRole(m)"
                 class="btn-sm btn-outline edit-btn" @click="startEditRole(m)">Edit</button>
             </template>
           </td>
@@ -140,8 +173,10 @@ async function toggleActive(member: any) {
             </span>
           </td>
           <td>{{ new Date(m.created_at).toLocaleDateString('ja-JP') }}</td>
-          <td>
-            <button v-if="m.username !== 'root'" class="btn-sm"
+          <td class="actions-cell">
+            <button v-if="canManage(m)" class="btn-sm btn-outline"
+              @click="resetPassword(m)">Reset PW</button>
+            <button v-if="canManage(m)" class="btn-sm"
               :class="m.is_active ? 'btn-danger' : 'btn-primary'"
               @click="toggleActive(m)">
               {{ m.is_active ? 'Disable' : 'Enable' }}
@@ -183,4 +218,13 @@ h1 { margin: 0; }
 .loading { color: #888; padding: 2rem; text-align: center; }
 .empty { color: #888; text-align: center; padding: 2rem; }
 .pagination { display: flex; align-items: center; gap: 1rem; justify-content: center; margin-top: 1rem; font-size: 0.9rem; }
+.actions-cell { display: flex; gap: 0.4rem; }
+.temp-password-alert {
+  background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;
+  padding: 1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+}
+.temp-password-code {
+  display: inline-block; padding: 0.4rem 0.8rem; background: #fff; border: 1px solid #ddd;
+  border-radius: 4px; font-size: 1rem; font-weight: 600; letter-spacing: 0.05em;
+}
 </style>

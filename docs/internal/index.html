@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jyogi-oauth 内部設計ドキュメント</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.doc-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.2rem; transition: box-shadow 0.2s, border-color 0.2s; }
+.doc-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: #1976d2; }
+.doc-card a { font-size: 1.1rem; font-weight: 600; }
+.doc-card p { font-size: 0.85rem; color: #666; margin-top: 0.4rem; }
+.doc-card .tag { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; margin-top: 0.5rem; }
+.tag-arch { background: #e3f2fd; color: #1565c0; }
+.tag-api { background: #e8f5e9; color: #2e7d32; }
+.tag-db { background: #fff3e0; color: #e65100; }
+.tag-security { background: #fce4ec; color: #c62828; }
+.tag-config { background: #f3e5f5; color: #6a1b9a; }
+</style>
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="../index.html">Top</a></li>
+<li><a href="../guide/index.html">Developer Guide</a></li>
+<li><strong>Internal Docs</strong></li>
+</ul>
+</nav>
+
+<h1>内部設計ドキュメント</h1>
+<p>jyogi-oauth の内部アーキテクチャ、API 仕様、データベース設計、セキュリティ設計。</p>
+
+<div class="doc-grid">
+  <div class="doc-card">
+    <a href="architecture.html">設計書</a>
+    <p>システム構成、アーキテクチャ図、OAuthフロー、プロジェクト構造</p>
+    <span class="tag tag-arch">Architecture</span>
+  </div>
+  <div class="doc-card">
+    <a href="api-auth-server.html">認可サーバー API</a>
+    <p>Go 認可サーバーの全エンドポイント設計</p>
+    <span class="tag tag-api">API</span>
+  </div>
+  <div class="doc-card">
+    <a href="api-resource-server.html">リソースサーバー API</a>
+    <p>Rust リソースサーバーの Identity API 設計</p>
+    <span class="tag tag-api">API</span>
+  </div>
+  <div class="doc-card">
+    <a href="db-postgresql.html">PostgreSQL データ設計</a>
+    <p>auth / resource スキーマ、テーブル定義、ER図</p>
+    <span class="tag tag-db">Database</span>
+  </div>
+  <div class="doc-card">
+    <a href="db-redis.html">Redis データ設計</a>
+    <p>キー設計、トークン管理、セッション、Rate Limit</p>
+    <span class="tag tag-db">Database</span>
+  </div>
+  <div class="doc-card">
+    <a href="env-variables.html">環境変数一覧</a>
+    <p>全コンテナの環境変数、.env サンプル</p>
+    <span class="tag tag-config">Config</span>
+  </div>
+  <div class="doc-card">
+    <a href="jwt-claims.html">JWT クレーム定義</a>
+    <p>ES256 署名、ペイロード、ID Token、JWKS</p>
+    <span class="tag tag-security">Security</span>
+  </div>
+  <div class="doc-card">
+    <a href="security.html">セキュリティ設計</a>
+    <p>Cloudflare Tunnel、CORS、CSRF、argon2id、Rate Limit</p>
+    <span class="tag tag-security">Security</span>
+  </div>
+</div>
+</body>
+</html>

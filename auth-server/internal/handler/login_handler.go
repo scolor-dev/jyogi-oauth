@@ -101,11 +101,12 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionData := &store.SessionData{
-		MemberID:    member.ID.String(),
-		Username:    member.Username,
-		IPAddress:   r.RemoteAddr,
-		UserAgent:   r.UserAgent(),
-		OAuthParams: oauthParams,
+		MemberID:           member.ID.String(),
+		Username:           member.Username,
+		MustChangePassword: member.MustChangePassword,
+		IPAddress:          r.RemoteAddr,
+		UserAgent:          r.UserAgent(),
+		OAuthParams:        oauthParams,
 	}
 
 	sessionID, err := h.sessionStore.Create(r.Context(), sessionData)
@@ -128,7 +129,9 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.auditStore.Log(r.Context(), model.ActionLoginSuccess, &member.ID, nil, r.RemoteAddr, r.UserAgent(), nil)
 
 	redirectTo := "/dashboard"
-	if oauthParams != nil {
+	if member.MustChangePassword {
+		redirectTo = "/change-password"
+	} else if oauthParams != nil {
 		v := url.Values{}
 		v.Set("response_type", "code")
 		v.Set("client_id", oauthParams.ClientID)
@@ -137,10 +140,14 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 		v.Set("state", oauthParams.State)
 		v.Set("code_challenge", oauthParams.CodeChallenge)
 		v.Set("code_challenge_method", oauthParams.CodeChallengeMethod)
+		if oauthParams.Nonce != "" {
+			v.Set("nonce", oauthParams.Nonce)
+		}
 		redirectTo = "/oauth/authorize?" + v.Encode()
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"redirect_to": redirectTo,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"redirect_to":          redirectTo,
+		"must_change_password": member.MustChangePassword,
 	})
 }

@@ -81,16 +81,17 @@ func main() {
 		sessionStore, consentStore, authCodeStore, clientStore, scopeStore, auditStore, cfg,
 	)
 	tokenHandler := handler.NewTokenHandler(
-		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, cfg,
+		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, pool, cfg,
 	)
 	revokeHandler := handler.NewRevokeHandler(refreshStore, clientStore, auditStore)
 	introspectHandler := handler.NewIntrospectHandler(jwtService)
-	userinfoHandler := handler.NewUserInfoHandler(memberStore, jwtService)
+	userinfoHandler := handler.NewUserInfoHandler(memberStore, jwtService, pool)
+	discoveryHandler := handler.NewDiscoveryHandler(cfg.JWTIssuer)
 	adminClientHandler := handler.NewAdminClientHandler(clientStore, auditStore)
 	meHandler := handler.NewMeHandler(memberStore, sessionStore, pool, cfg.SessionCookieName)
 	meIdentityHandler := handler.NewMeIdentityHandler(pool)
 	meConsentHandler := handler.NewMeConsentHandler(consentStore, auditStore, pool)
-	mePasswordHandler := handler.NewMePasswordHandler(memberStore, auditStore, pwConfig)
+	mePasswordHandler := handler.NewMePasswordHandler(memberStore, sessionStore, auditStore, pwConfig)
 	meClientHandler := handler.NewMeClientHandler(clientStore, auditStore)
 
 	mux := http.NewServeMux()
@@ -121,6 +122,7 @@ func main() {
 			status, pgStatus, redisStatus)
 	})
 
+	mux.Handle("GET /.well-known/openid-configuration", discoveryHandler)
 	mux.Handle("GET /oauth/jwks", jwksHandler)
 	mux.HandleFunc("POST /oauth/login", loginHandler.Login)
 	mux.HandleFunc("GET /oauth/authorize", authorizeHandler.Authorize)
@@ -150,6 +152,7 @@ func main() {
 	adminMembers.HandleFunc("GET /oauth/admin/members/{id}", adminMemberHandler.Get)
 	adminMembers.HandleFunc("PUT /oauth/admin/members/{id}", adminMemberHandler.Update)
 	adminMembers.HandleFunc("DELETE /oauth/admin/members/{id}", adminMemberHandler.Delete)
+	adminMembers.HandleFunc("POST /oauth/admin/members/{id}/reset-password", adminMemberHandler.ResetPassword)
 	mux.Handle("/oauth/admin/members", adminMiddleware.RequireModerator(adminMembers))
 	mux.Handle("/oauth/admin/members/", adminMiddleware.RequireModerator(adminMembers))
 

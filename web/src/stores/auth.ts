@@ -27,6 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const isLoggedIn = () => member.value !== null
+  const mustChangePassword = () => member.value?.must_change_password === true
 
-  return { member, identity, loaded, fetchMe, logout, isLoggedIn }
+  return { member, identity, loaded, fetchMe, logout, isLoggedIn, mustChangePassword }
 })

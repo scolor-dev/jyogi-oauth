@@ -21,8 +21,9 @@ CREATE TABLE auth.members (
     username      VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     email         VARCHAR(255) NOT NULL UNIQUE,
-    role          VARCHAR(50)  NOT NULL DEFAULT 'member',
-    is_active     BOOLEAN      NOT NULL DEFAULT true,
+    role                 VARCHAR(50)  NOT NULL DEFAULT 'member',
+    must_change_password BOOLEAN      NOT NULL DEFAULT false,
+    is_active            BOOLEAN      NOT NULL DEFAULT true,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
@@ -169,12 +170,13 @@ GRANT SELECT ON auth.members TO jyogi_resource;
 ------------------------------------------------------------------------
 
 INSERT INTO auth.scopes (name, description, is_default) VALUES
+    ('openid',         'OpenID Connect 認証',                                      true),
     ('read',           'リソースの読み取り',                                       true),
     ('write',          'リソースの書き込み',                                       false),
     ('admin',          '管理者権限',                                               false),
     ('identity',       'メンバーの基本識別情報の読み取り（表示名、アイコン、カラー、タグライン）', true),
     ('identity:write', 'メンバーの基本識別情報の更新',                              false),
-    ('profile',        'メンバーの詳細プロフィールの読み取り（予定）',               false);
+    ('profile',        'メンバーの詳細プロフィール（name, preferred_username）',     false);
 
 -- Root admin member (password: 65536)
 INSERT INTO auth.members (username, password_hash, email, role) VALUES (

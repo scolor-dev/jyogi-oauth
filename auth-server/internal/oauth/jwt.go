@@ -3,17 +3,24 @@ package oauth
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
+
+func HasScope(scopeStr, target string) bool {
+	return slices.Contains(strings.Fields(scopeStr), target)
+}
 
 type JWTService struct {
 	privateKey     *ecdsa.PrivateKey
@@ -138,6 +145,76 @@ func (j *JWTService) SignClientCredentialsToken(clientID, scope string) (string,
 	token.Header["kid"] = j.kid
 
 	return token.SignedString(j.privateKey)
+}
+
+type IDTokenClaims struct {
+	MemberID    string
+	ClientID    string
+	Nonce       string
+	AuthTime    int64
+	Scope       string
+	AccessToken string
+	// profile claims
+	Name              string
+	PreferredUsername  string
+	// identity claims
+	Picture string
+	Color   string
+	Tagline string
+}
+
+func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
+	now := time.Now()
+
+	mapClaims := jwt.MapClaims{
+		"iss":       j.issuer,
+		"sub":       claims.MemberID,
+		"aud":       claims.ClientID,
+		"exp":       jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
+		"iat":       jwt.NewNumericDate(now),
+		"auth_time": claims.AuthTime,
+	}
+
+	if claims.AccessToken != "" {
+		mapClaims["at_hash"] = computeAtHash(claims.AccessToken)
+	}
+
+	if claims.Nonce != "" {
+		mapClaims["nonce"] = claims.Nonce
+	}
+
+	if HasScope(claims.Scope, "profile") {
+		if claims.Name != "" {
+			mapClaims["name"] = claims.Name
+		}
+		if claims.PreferredUsername != "" {
+			mapClaims["preferred_username"] = claims.PreferredUsername
+		}
+	}
+	if HasScope(claims.Scope, "identity") {
+		if claims.Name != "" {
+			mapClaims["name"] = claims.Name
+		}
+		if claims.Picture != "" {
+			mapClaims["picture"] = claims.Picture
+		}
+		if claims.Color != "" {
+			mapClaims["color"] = claims.Color
+		}
+		if claims.Tagline != "" {
+			mapClaims["tagline"] = claims.Tagline
+		}
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, mapClaims)
+	token.Header["kid"] = j.kid
+
+	return token.SignedString(j.privateKey)
+}
+
+func computeAtHash(accessToken string) string {
+	h := sha256.Sum256([]byte(accessToken))
+	return base64.RawURLEncoding.EncodeToString(h[:16])
 }
 
 func (j *JWTService) VerifyToken(tokenString string) (jwt.MapClaims, error) {

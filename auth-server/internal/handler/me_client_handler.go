@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
@@ -20,12 +19,7 @@ func NewMeClientHandler(clientStore *store.ClientStore, auditStore *store.AuditS
 }
 
 func (h *MeClientHandler) requireMember(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	memberID, ok := middleware.GetMemberID(r.Context())
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Not logged in")
-		return uuid.UUID{}, false
-	}
-	return memberID, true
+	return requireSession(w, r)
 }
 
 func (h *MeClientHandler) List(w http.ResponseWriter, r *http.Request) {

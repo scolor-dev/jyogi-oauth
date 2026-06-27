@@ -50,6 +50,20 @@ func requireSession(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Not logged in")
 		return uuid.UUID{}, false
 	}
+	session := middleware.GetSession(r.Context())
+	if session != nil && session.MustChangePassword {
+		writeError(w, http.StatusForbidden, "password_change_required", "You must change your password before continuing")
+		return uuid.UUID{}, false
+	}
+	return memberID, true
+}
+
+func requireSessionAllowForceChange(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	memberID, ok := middleware.GetMemberID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Not logged in")
+		return uuid.UUID{}, false
+	}
 	return memberID, true
 }
 

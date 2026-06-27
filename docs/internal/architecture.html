@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>jyogi-oauth 設計書</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../style.css">
 <style>
 .diagram { margin: 1.5rem 0; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0; overflow-x: auto; }
 .diagram-title { font-weight: 600; text-align: center; margin-bottom: 1rem; font-size: 0.9rem; color: #555; }
@@ -47,7 +47,7 @@
 <body>
 <nav>
 <ul>
-<li><a href="index.html">Index</a></li>
+<li><a href="../index.html">Index</a></li>
 <li><a href="architecture.html">設計書</a></li>
 <li><a href="api-auth-server.html">認可サーバー API</a></li>
 <li><a href="api-resource-server.html">リソースサーバー API</a></li>
@@ -62,7 +62,7 @@
 <h1>jyogi-oauth 設計書</h1>
 
 <h2>概要</h2>
-<p>部内向け OAuth 2.0 認可基盤。認可サーバー・リソースサーバー・フロントエンドを1台の Linux サーバーに Docker Compose で構築し、将来的にサーバー分離が可能な設計とする。</p>
+<p>部内向け OAuth 2.0 / OpenID Connect 認可基盤。認可サーバー・リソースサーバー・フロントエンドを1台の Linux サーバーに Docker Compose で構築し、将来的にサーバー分離が可能な設計とする。</p>
 
 <hr>
 
@@ -110,7 +110,7 @@
 
 <hr>
 
-<h2>OAuth 2.0 フロー（Authorization Code + PKCE）</h2>
+<h2>OAuth 2.0 / OIDC フロー（Authorization Code + PKCE）</h2>
 
 <div class="diagram">
 <div class="flow-step">
@@ -180,7 +180,7 @@
   <div class="flow-num">10</div>
   <div class="flow-content">
     <div class="flow-actors"><span class="actor actor-go">Go</span> → <span class="actor actor-client">Client</span></div>
-    トークンレスポンス: <code>{ access_token(JWT), refresh_token, token_type, expires_in: 900, scope }</code>
+    トークンレスポンス: <code>{ access_token(JWT), refresh_token, id_token(openid時), token_type, expires_in: 900, scope }</code>
   </div>
 </div>
 <div class="flow-step">
@@ -248,7 +248,7 @@
 <tr><td>client_secret_hash</td><td>VARCHAR(255)</td><td>シークレットのハッシュ</td></tr>
 <tr><td>name</td><td>VARCHAR(255)</td><td>アプリ名</td></tr>
 <tr><td>redirect_uris</td><td>TEXT[]</td><td>許可されたリダイレクト URI</td></tr>
-<tr><td>allowed_scopes</td><td>TEXT[]</td><td>許可されたスコープ</td></tr>
+<tr><td>allowed_grant_types</td><td>TEXT[]</td><td>許可された grant type</td></tr>
 <tr><td>client_type</td><td>VARCHAR(50)</td><td>confidential / public</td></tr>
 <tr><td>is_active</td><td>BOOLEAN</td><td>有効/無効</td></tr>
 <tr><td>created_at</td><td>TIMESTAMP</td><td>作成日時</td></tr>
@@ -283,7 +283,7 @@
 
 <h3>Go 認可サーバー (:8080)</h3>
 
-<h4>OAuth コア</h4>
+<h4>OAuth / OIDC コア</h4>
 <table>
 <thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead>
 <tbody>
@@ -292,7 +292,8 @@
 <tr><td><code>POST</code></td><td>/oauth/revoke</td><td>トークン失効</td></tr>
 <tr><td><code>GET</code></td><td>/oauth/jwks</td><td>公開鍵 (JWKS)</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/introspect</td><td>トークンイントロスペクション</td></tr>
-<tr><td><code>GET</code></td><td>/oauth/userinfo</td><td>メンバー情報</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/userinfo</td><td>OIDC UserInfo（スコープに応じたクレーム）</td></tr>
+<tr><td><code>GET</code></td><td>/.well-known/openid-configuration</td><td>OIDC Discovery</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/login</td><td>ログイン認証</td></tr>
 <tr><td><code>GET/POST</code></td><td>/oauth/consent</td><td>同意情報取得・処理</td></tr>
 <tr><td><code>POST</code></td><td>/oauth/logout</td><td>ログアウト</td></tr>
@@ -349,6 +350,7 @@
 <tr><td>/</td><td>ホーム</td><td>サービス紹介、ログインボタン</td></tr>
 <tr><td>/login</td><td>ログイン</td><td>ID/パスワード認証フォーム</td></tr>
 <tr><td>/consent</td><td>認可同意</td><td>OAuthフロー中のスコープ許可確認</td></tr>
+<tr><td>/change-password</td><td>パスワード変更</td><td>一時パスワードでログイン時に強制表示</td></tr>
 <tr><td>/dashboard</td><td>ダッシュボード</td><td>3タブ構成（下記参照）</td></tr>
 <tr><td>/admin</td><td>管理画面トップ</td><td>moderator / admin のみ表示</td></tr>
 <tr><td>/admin/members</td><td>メンバー管理</td><td>一覧・作成・ロール変更・有効/無効切替</td></tr>
@@ -369,7 +371,7 @@
 <thead><tr><th>ページ</th><th>必要ロール</th><th>機能</th></tr></thead>
 <tbody>
 <tr><td>Overview</td><td>moderator+</td><td>管理メニュー</td></tr>
-<tr><td>Members</td><td>moderator+</td><td>メンバー一覧、作成、有効/無効化。ロール変更は admin のみ</td></tr>
+<tr><td>Members</td><td>moderator+</td><td>メンバー一覧、作成、有効/無効化、パスワードリセット。ロール変更は admin のみ</td></tr>
 <tr><td>Clients</td><td>admin</td><td>全クライアント一覧、無効化</td></tr>
 </tbody>
 </table>

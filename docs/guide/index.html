@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jyogi-oauth 開発者ガイド</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+.guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.guide-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.2rem; transition: box-shadow 0.2s, border-color 0.2s; }
+.guide-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: #1976d2; }
+.guide-card a { font-size: 1.1rem; font-weight: 600; }
+.guide-card p { font-size: 0.85rem; color: #666; margin-top: 0.4rem; }
+.step-num { display: inline-block; background: #1976d2; color: #fff; border-radius: 50%; width: 24px; height: 24px; text-align: center; line-height: 24px; font-size: 0.8rem; font-weight: 700; margin-right: 0.5rem; }
+</style>
+</head>
+<body>
+<nav>
+<ul>
+<li><a href="../index.html">Top</a></li>
+<li><strong>Developer Guide</strong></li>
+<li><a href="../internal/index.html">Internal Docs</a></li>
+</ul>
+</nav>
+
+<h1>開発者ガイド</h1>
+<p>jyogi-oauth を利用してアプリケーションを構築する開発者向けのガイドです。</p>
+
+<div class="guide-grid">
+  <div class="guide-card">
+    <a href="quickstart.html"><span class="step-num">1</span>クイックスタート</a>
+    <p>クライアント登録 → 認可フロー → トークン取得 → API呼び出しの一連の流れを curl で体験</p>
+  </div>
+  <div class="guide-card">
+    <a href="scopes.html"><span class="step-num">2</span>スコープとデータ</a>
+    <p>利用可能なスコープ一覧と、各スコープで取得できるデータの対応表</p>
+  </div>
+</div>
+</body>
+</html>

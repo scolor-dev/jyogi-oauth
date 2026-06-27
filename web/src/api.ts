@@ -30,6 +30,9 @@ export const api = {
   updateIdentity: (data: { display_name: string; avatar_url?: string | null; theme_color: string; tagline?: string | null }) =>
     request<any>('PUT', '/oauth/me/identity', data),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ status: string }>('PUT', '/oauth/me/password', { current_password: currentPassword, new_password: newPassword }),
+
   getConsents: () =>
     request<{ consents: any[] }>('GET', '/oauth/me/consents'),
 
@@ -70,6 +73,9 @@ export const api = {
 
     deleteMember: (id: string) =>
       request<void>('DELETE', `/oauth/admin/members/${id}`),
+
+    resetPassword: (id: string) =>
+      request<{ temporary_password: string; message: string }>('POST', `/oauth/admin/members/${id}/reset-password`),
 
     listClients: (page = 1, perPage = 20) =>
       request<{ clients: any[]; total: number; page: number; per_page: number }>('GET', `/oauth/admin/clients?page=${page}&per_page=${perPage}`),

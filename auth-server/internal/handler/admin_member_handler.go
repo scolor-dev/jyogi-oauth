@@ -4,10 +4,42 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
+
+func (h *AdminMemberHandler) checkPrivilege(w http.ResponseWriter, r *http.Request, targetID uuid.UUID) (*model.Member, bool) {
+	operator := middleware.GetAdminMember(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Not logged in")
+		return nil, false
+	}
+
+	if operator.ID == targetID {
+		writeError(w, http.StatusForbidden, "forbidden", "Cannot modify yourself via Admin API")
+		return nil, false
+	}
+
+	target, err := h.memberStore.GetByID(r.Context(), targetID)
+	if err != nil || target == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Member not found")
+		return nil, false
+	}
+
+	if target.IsRoot() {
+		writeError(w, http.StatusForbidden, "forbidden", "Cannot modify root user")
+		return nil, false
+	}
+
+	if !model.CanManage(operator.Role, target.Role) {
+		writeError(w, http.StatusForbidden, "forbidden", "Insufficient permissions to manage this member")
+		return nil, false
+	}
+
+	return target, true
+}
 
 type AdminMemberHandler struct {
 	memberStore *store.MemberStore
@@ -111,6 +143,12 @@ func (h *AdminMemberHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.checkPrivilege(w, r, id); !ok {
+		return
+	}
+
+	operator := middleware.GetAdminMember(r.Context())
+
 	var req updateMemberRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
@@ -138,6 +176,10 @@ func (h *AdminMemberHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Role != nil {
+		if !operator.IsAdmin() {
+			writeError(w, http.StatusForbidden, "forbidden", "Only admin can change roles")
+			return
+		}
 		valid := *req.Role == model.RoleMember || *req.Role == model.RoleModerator || *req.Role == model.RoleAdmin
 		if !valid {
 			writeError(w, http.StatusBadRequest, "invalid_request", "role must be member, moderator, or admin")
@@ -167,6 +209,10 @@ func (h *AdminMemberHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.checkPrivilege(w, r, id); !ok {
+		return
+	}
+
 	if err := h.memberStore.Deactivate(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to deactivate member")
 		return
@@ -175,4 +221,48 @@ func (h *AdminMemberHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.auditStore.Log(r.Context(), model.ActionMemberDeactivated, &id, nil, r.RemoteAddr, r.UserAgent(), nil)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AdminMemberHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid member ID")
+		return
+	}
+
+	member, ok := h.checkPrivilege(w, r, id)
+	if !ok {
+		return
+	}
+
+	tempPassword, err := oauth.GenerateRandomString(9)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate password")
+		return
+	}
+
+	hash, err := oauth.HashPassword(tempPassword, h.pwConfig)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to hash password")
+		return
+	}
+
+	if err := h.memberStore.UpdatePassword(r.Context(), id, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update password")
+		return
+	}
+
+	if err := h.memberStore.SetMustChangePassword(r.Context(), id, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set password reset flag")
+		return
+	}
+
+	h.auditStore.Log(r.Context(), model.ActionPasswordReset, &id, nil, r.RemoteAddr, r.UserAgent(), map[string]string{
+		"target_username": member.Username,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"temporary_password": tempPassword,
+		"message":            "Password has been reset. Member must change it on next login.",
+	})
 }

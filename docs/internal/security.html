@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>セキュリティ設計</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../style.css">
 </head>
 <body>
 <nav>
 <ul>
-<li><a href="index.html">Index</a></li>
+<li><a href="../index.html">Index</a></li>
 <li><a href="architecture.html">設計書</a></li>
 <li><a href="api-auth-server.html">認可サーバー API</a></li>
 <li><a href="api-resource-server.html">リソースサーバー API</a></li>
@@ -158,7 +158,7 @@ if ($request_method = OPTIONS) {
 <tbody>
 <tr>
 <td>/oauth/authorize</td>
-<td><code>state</code> パラメータで CSRF 防止（OAuth 2.0 仕様）</td>
+<td><code>state</code> パラメータで CSRF 防止（OAuth 2.0 仕様）。OIDC 時は <code>nonce</code> でリプレイ攻撃防止</td>
 </tr>
 <tr>
 <td>/oauth/token</td>
@@ -174,6 +174,16 @@ if ($request_method = OPTIONS) {
 </tr>
 </tbody>
 </table>
+<h4>パスワード変更強制 (must_change_password)</h4>
+<p><code>must_change_password=true</code> のセッションは以下のエンドポイントでバックエンド側にブロックされる。フロントエンドのナビゲーションガードだけに依存しない。</p>
+<ul>
+<li><code>/oauth/authorize</code> — <code>/change-password</code> にリダイレクト</li>
+<li><code>/oauth/consent</code> — 403 で拒否</li>
+<li><code>/oauth/me/clients/*</code> — 403 で拒否</li>
+<li><code>/oauth/admin/*</code> — 403 で拒否</li>
+<li>その他 <code>requireSession</code> を使用する全エンドポイント — 403 で拒否</li>
+</ul>
+<p>アクセスが許可されるエンドポイント: <code>GET /oauth/me</code>、<code>PUT /oauth/me/password</code></p>
 <h3>セッション Cookie</h3>
 <pre><code>Set-Cookie: jyogi_sid={session_id};
     HttpOnly;
@@ -294,6 +304,18 @@ if ($request_method = OPTIONS) {
 </tr>
 </tbody>
 </table>
+
+<h3>管理者パスワードリセット</h3>
+<table>
+<thead><tr><th>項目</th><th>設計</th></tr></thead>
+<tbody>
+<tr><td>一時パスワード</td><td>12文字のランダム文字列（Base64url）。レスポンスで一度だけ表示</td></tr>
+<tr><td>強制変更</td><td><code>must_change_password = true</code> に設定。次回ログイン時にパスワード変更画面へ強制リダイレクト</td></tr>
+<tr><td>アクセス制限</td><td>パスワード変更完了まで <code>/oauth/me/password</code> と <code>/oauth/logout</code> 以外のセッション認証エンドポイントを403で拒否</td></tr>
+<tr><td>フロントガード</td><td>ルーターのナビゲーションガードで <code>/change-password</code> 以外への遷移をブロック</td></tr>
+<tr><td>監査</td><td><code>password_reset</code> アクションをログ記録（target_username を details に含む）</td></tr>
+</tbody>
+</table>
 <hr />
 <h2>Rate Limit</h2>
 <h3>ブルートフォース対策</h3>
@@ -366,6 +388,18 @@ Retry-After: 30
 <td>失効方法</td>
 <td>自然失効のみ（最大15分待ち）</td>
 </tr>
+</tbody>
+</table>
+<h3>ID トークン（OIDC）</h3>
+<table>
+<thead><tr><th>項目</th><th>設計</th></tr></thead>
+<tbody>
+<tr><td>形式</td><td>JWT（ES256 署名）</td></tr>
+<tr><td>発行条件</td><td>scope に <code>openid</code> を含む場合のみ</td></tr>
+<tr><td>aud</td><td>client_id（access_token の aud とは異なる）</td></tr>
+<tr><td>nonce</td><td>authorize リクエストで指定された場合に含める。<strong>クライアント側で検証必須</strong></td></tr>
+<tr><td>auth_time</td><td>認証実行時刻</td></tr>
+<tr><td>refresh 時</td><td>refresh_token grant でも scope に openid を含む場合は再発行</td></tr>
 </tbody>
 </table>
 <h3>リフレッシュトークン</h3>

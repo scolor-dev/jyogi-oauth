@@ -3,19 +3,21 @@ package handler
 import (
 	"net/http"
 
+	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
 
 type MePasswordHandler struct {
-	memberStore *store.MemberStore
-	auditStore  *store.AuditStore
-	pwConfig    *oauth.PasswordConfig
+	memberStore  *store.MemberStore
+	sessionStore *store.SessionStore
+	auditStore   *store.AuditStore
+	pwConfig     *oauth.PasswordConfig
 }
 
-func NewMePasswordHandler(memberStore *store.MemberStore, auditStore *store.AuditStore, pwConfig *oauth.PasswordConfig) *MePasswordHandler {
-	return &MePasswordHandler{memberStore: memberStore, auditStore: auditStore, pwConfig: pwConfig}
+func NewMePasswordHandler(memberStore *store.MemberStore, sessionStore *store.SessionStore, auditStore *store.AuditStore, pwConfig *oauth.PasswordConfig) *MePasswordHandler {
+	return &MePasswordHandler{memberStore: memberStore, sessionStore: sessionStore, auditStore: auditStore, pwConfig: pwConfig}
 }
 
 type changePasswordRequest struct {
@@ -24,7 +26,7 @@ type changePasswordRequest struct {
 }
 
 func (h *MePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	memberID, ok := requireSession(w, r)
+	memberID, ok := requireSessionAllowForceChange(w, r)
 	if !ok {
 		return
 	}
@@ -66,6 +68,18 @@ func (h *MePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Reques
 	if err := h.memberStore.UpdatePassword(r.Context(), memberID, hash); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update password")
 		return
+	}
+
+	if err := h.memberStore.SetMustChangePassword(r.Context(), memberID, false); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear password reset flag")
+		return
+	}
+
+	sessionID := middleware.GetSessionID(r.Context())
+	session := middleware.GetSession(r.Context())
+	if sessionID != "" && session != nil && session.MustChangePassword {
+		session.MustChangePassword = false
+		h.sessionStore.Update(r.Context(), sessionID, session)
 	}
 
 	h.auditStore.Log(r.Context(), model.ActionMemberUpdated, &memberID, nil, r.RemoteAddr, r.UserAgent(), map[string]any{"field": "password"})

@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jyogi-oauth/auth-server/internal/config"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
@@ -18,6 +21,7 @@ type TokenHandler struct {
 	memberStore   *store.MemberStore
 	jwtService    *oauth.JWTService
 	auditStore    *store.AuditStore
+	pool          *pgxpool.Pool
 	cfg           *config.Config
 }
 
@@ -28,6 +32,7 @@ func NewTokenHandler(
 	memberStore *store.MemberStore,
 	jwtService *oauth.JWTService,
 	auditStore *store.AuditStore,
+	pool *pgxpool.Pool,
 	cfg *config.Config,
 ) *TokenHandler {
 	return &TokenHandler{
@@ -37,6 +42,7 @@ func NewTokenHandler(
 		memberStore:   memberStore,
 		jwtService:    jwtService,
 		auditStore:    auditStore,
+		pool:          pool,
 		cfg:           cfg,
 	}
 }
@@ -139,6 +145,7 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		MemberID: codeData.MemberID,
 		ClientID: clientID,
 		Scope:    codeData.Scope,
+		AuthTime: codeData.AuthTime,
 	})
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to save refresh token")
@@ -149,13 +156,53 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		"grant_type": "authorization_code",
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"access_token":  accessToken,
 		"token_type":    "Bearer",
 		"expires_in":    int(h.cfg.AccessTokenTTL.Seconds()),
 		"refresh_token": refreshToken,
 		"scope":         codeData.Scope,
-	})
+	}
+
+	if oauth.HasScope(codeData.Scope, "openid") {
+		idTokenClaims := oauth.IDTokenClaims{
+			MemberID:         codeData.MemberID,
+			ClientID:         clientID,
+			Nonce:            codeData.Nonce,
+			AuthTime:         codeData.AuthTime,
+			Scope:            codeData.Scope,
+			AccessToken:      accessToken,
+			PreferredUsername: member.Username,
+		}
+		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(codeData.MemberID))
+		idToken, err := h.jwtService.SignIDToken(idTokenClaims)
+		if err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to sign id_token")
+			return
+		}
+		resp["id_token"] = idToken
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func applyIdentityClaims(ctx context.Context, pool *pgxpool.Pool, claims *oauth.IDTokenClaims, memberID uuid.UUID) {
+	ic := getIdentityClaims(ctx, pool, memberID)
+	if ic == nil {
+		return
+	}
+	if ic.DisplayName != nil {
+		claims.Name = *ic.DisplayName
+	}
+	if ic.AvatarURL != nil {
+		claims.Picture = *ic.AvatarURL
+	}
+	if ic.ThemeColor != nil {
+		claims.Color = *ic.ThemeColor
+	}
+	if ic.Tagline != nil {
+		claims.Tagline = *ic.Tagline
+	}
 }
 
 func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +247,10 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 
 	scope := tokenData.Scope
 	if reqScope := r.FormValue("scope"); reqScope != "" {
+		if !isSubsetScope(reqScope, tokenData.Scope) {
+			writeOAuthError(w, http.StatusBadRequest, "invalid_scope", "Requested scope exceeds the original grant")
+			return
+		}
 		scope = reqScope
 	}
 
@@ -230,19 +281,40 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		MemberID: tokenData.MemberID,
 		ClientID: clientID,
 		Scope:    scope,
+		AuthTime: tokenData.AuthTime,
 	})
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to save refresh token")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"access_token":  accessToken,
 		"token_type":    "Bearer",
 		"expires_in":    int(h.cfg.AccessTokenTTL.Seconds()),
 		"refresh_token": newRefreshToken,
 		"scope":         scope,
-	})
+	}
+
+	if oauth.HasScope(scope, "openid") {
+		idTokenClaims := oauth.IDTokenClaims{
+			MemberID:         tokenData.MemberID,
+			ClientID:         clientID,
+			AuthTime:         tokenData.AuthTime,
+			Scope:            scope,
+			AccessToken:      accessToken,
+			PreferredUsername: member.Username,
+		}
+		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(tokenData.MemberID))
+		idToken, err := h.jwtService.SignIDToken(idTokenClaims)
+		if err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to sign id_token")
+			return
+		}
+		resp["id_token"] = idToken
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *TokenHandler) handleClientCredentials(w http.ResponseWriter, r *http.Request) {
@@ -296,6 +368,21 @@ func writeOAuthError(w http.ResponseWriter, status int, errorCode, description s
 		"error":             errorCode,
 		"error_description": description,
 	})
+}
+
+func isSubsetScope(requested, original string) bool {
+	originalSet := make(map[string]bool)
+	for _, s := range strings.Split(original, " ") {
+		if s != "" {
+			originalSet[s] = true
+		}
+	}
+	for _, s := range strings.Split(requested, " ") {
+		if s != "" && !originalSet[s] {
+			return false
+		}
+	}
+	return true
 }
 
 func mustParseUUID(s string) uuid.UUID {

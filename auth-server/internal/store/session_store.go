@@ -19,11 +19,13 @@ type OAuthFlowParams struct {
 	State               string `json:"state"`
 	CodeChallenge       string `json:"code_challenge"`
 	CodeChallengeMethod string `json:"code_challenge_method"`
+	Nonce               string `json:"nonce,omitempty"`
 }
 
 type SessionData struct {
-	MemberID       string           `json:"member_id"`
-	Username       string           `json:"username"`
+	MemberID           string           `json:"member_id"`
+	Username           string           `json:"username"`
+	MustChangePassword bool             `json:"must_change_password,omitempty"`
 	IPAddress      string           `json:"ip_address"`
 	UserAgent      string           `json:"user_agent"`
 	CreatedAt      int64            `json:"created_at"`
