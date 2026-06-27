@@ -440,12 +440,13 @@ Content-Type: application/json
 <pre><code class="language-json">{
   &quot;keys&quot;: [
     {
-      &quot;kty&quot;: &quot;RSA&quot;,
+      &quot;kty&quot;: &quot;EC&quot;,
       &quot;use&quot;: &quot;sig&quot;,
-      &quot;kid&quot;: &quot;key-2024-01&quot;,
-      &quot;alg&quot;: &quot;RS256&quot;,
-      &quot;n&quot;: &quot;0vx7agoebGcQ...&quot;,
-      &quot;e&quot;: &quot;AQAB&quot;
+      &quot;kid&quot;: &quot;key-1&quot;,
+      &quot;alg&quot;: &quot;ES256&quot;,
+      &quot;crv&quot;: &quot;P-256&quot;,
+      &quot;x&quot;: &quot;f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU&quot;,
+      &quot;y&quot;: &quot;x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0&quot;
     }
   ]
 }
@@ -565,7 +566,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
       &quot;name&quot;: &quot;My Application&quot;,
       &quot;client_type&quot;: &quot;confidential&quot;,
       &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-      &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+      &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
       &quot;is_active&quot;: true,
       &quot;created_at&quot;: &quot;2026-01-15T09:00:00Z&quot;
     }
@@ -582,7 +583,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;name&quot;: &quot;My Application&quot;,
   &quot;client_type&quot;: &quot;confidential&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;]
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;]
 }
 </code></pre>
 <p><strong>成功レスポンス:</strong></p>
@@ -595,7 +596,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;name&quot;: &quot;My Application&quot;,
   &quot;client_type&quot;: &quot;confidential&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;],
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
   &quot;is_active&quot;: true,
   &quot;created_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
 }
@@ -609,7 +610,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;Updated App Name&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;, &quot;https://my-app.example/callback2&quot;],
-  &quot;allowed_scopes&quot;: [&quot;read&quot;, &quot;write&quot;, &quot;admin&quot;],
+  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;, &quot;refresh_token&quot;],
   &quot;is_active&quot;: true
 }
 </code></pre>
