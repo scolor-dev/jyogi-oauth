@@ -64,7 +64,9 @@ func (s *SessionStore) Create(ctx context.Context, data *SessionData) (string, e
 
 	if data.MemberID != "" {
 		memberSetKey := "auth:member_sessions:" + data.MemberID
-		s.client.SAdd(ctx, memberSetKey, sessionID)
+		if err := s.client.SAdd(ctx, memberSetKey, sessionID).Err(); err != nil {
+			return "", fmt.Errorf("track session: %w", err)
+		}
 		s.client.Expire(ctx, memberSetKey, s.ttl)
 	}
 
@@ -95,6 +97,9 @@ func (s *SessionStore) Update(ctx context.Context, sessionID string, data *Sessi
 	}
 	if err := s.client.Set(ctx, "auth:session:"+sessionID, b, s.ttl).Err(); err != nil {
 		return fmt.Errorf("update session: %w", err)
+	}
+	if data.MemberID != "" {
+		s.client.Expire(ctx, "auth:member_sessions:"+data.MemberID, s.ttl)
 	}
 	return nil
 }
@@ -143,5 +148,9 @@ func (s *SessionStore) DeleteByID(ctx context.Context, sessionID, memberID strin
 	if data.MemberID != memberID {
 		return fmt.Errorf("session does not belong to this member")
 	}
-	return s.Delete(ctx, sessionID)
+	if err := s.client.Del(ctx, "auth:session:"+sessionID).Err(); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	s.client.SRem(ctx, "auth:member_sessions:"+memberID, sessionID)
+	return nil
 }

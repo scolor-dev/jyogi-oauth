@@ -124,7 +124,10 @@ func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if mustChange {
-		h.memberStore.SetMustChangePassword(r.Context(), member.ID, true)
+		if err := h.memberStore.SetMustChangePassword(r.Context(), member.ID, true); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set password change flag")
+			return
+		}
 		member.MustChangePassword = true
 	}
 
@@ -133,14 +136,11 @@ func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"must_change_password": fmt.Sprintf("%v", mustChange),
 	})
 
+	resp := map[string]any{"member": member}
 	if tempPassword != "" {
-		writeJSON(w, http.StatusCreated, map[string]any{
-			"member":             member,
-			"temporary_password": tempPassword,
-		})
-	} else {
-		writeJSON(w, http.StatusCreated, member)
+		resp["temporary_password"] = tempPassword
 	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *AdminMemberHandler) Get(w http.ResponseWriter, r *http.Request) {
