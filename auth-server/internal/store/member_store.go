@@ -18,13 +18,13 @@ func NewMemberStore(pool *pgxpool.Pool) *MemberStore {
 	return &MemberStore{pool: pool}
 }
 
-func (s *MemberStore) Create(ctx context.Context, username, passwordHash, email string) (*model.Member, error) {
+func (s *MemberStore) Create(ctx context.Context, username, passwordHash, email string, mustChangePassword bool) (*model.Member, error) {
 	m := &model.Member{}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO auth.members (username, password_hash, email)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO auth.members (username, password_hash, email, must_change_password)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, username, password_hash, email, role, must_change_password, is_active, created_at, updated_at`,
-		username, passwordHash, email,
+		username, passwordHash, email, mustChangePassword,
 	).Scan(&m.ID, &m.Username, &m.PasswordHash, &m.Email, &m.Role, &m.MustChangePassword, &m.IsActive, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert member: %w", err)
@@ -130,6 +130,17 @@ func (s *MemberStore) SetMustChangePassword(ctx context.Context, id uuid.UUID, v
 	_, err := s.pool.Exec(ctx, `UPDATE auth.members SET must_change_password = $1 WHERE id = $2`, val, id)
 	if err != nil {
 		return fmt.Errorf("set must_change_password: %w", err)
+	}
+	return nil
+}
+
+func (s *MemberStore) ResetPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE auth.members SET password_hash = $1, must_change_password = true WHERE id = $2`,
+		passwordHash, id,
+	)
+	if err != nil {
+		return fmt.Errorf("reset password: %w", err)
 	}
 	return nil
 }

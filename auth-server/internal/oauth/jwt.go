@@ -172,7 +172,10 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 		"aud":       claims.ClientID,
 		"exp":       jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
 		"iat":       jwt.NewNumericDate(now),
-		"auth_time": claims.AuthTime,
+	}
+
+	if claims.AuthTime != 0 {
+		mapClaims["auth_time"] = claims.AuthTime
 	}
 
 	if claims.AccessToken != "" {

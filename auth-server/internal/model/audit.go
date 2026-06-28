@@ -20,6 +20,7 @@ const (
 	ActionMemberCreated    = "member_created"
 	ActionMemberUpdated    = "member_updated"
 	ActionMemberDeactivated = "member_deactivated"
+	ActionSessionRevoked    = "session_revoked"
 )
 
 type AuditLog struct {

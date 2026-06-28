@@ -174,6 +174,9 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
 		}
+		if oauth.HasScope(codeData.Scope, "profile") {
+			idTokenClaims.Name = member.Username
+		}
 		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(codeData.MemberID))
 		idToken, err := h.jwtService.SignIDToken(idTokenClaims)
 		if err != nil {
@@ -304,6 +307,9 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 			Scope:            scope,
 			AccessToken:      accessToken,
 			PreferredUsername: member.Username,
+		}
+		if oauth.HasScope(scope, "profile") {
+			idTokenClaims.Name = member.Username
 		}
 		applyIdentityClaims(r.Context(), h.pool, &idTokenClaims, mustParseUUID(tokenData.MemberID))
 		idToken, err := h.jwtService.SignIDToken(idTokenClaims)

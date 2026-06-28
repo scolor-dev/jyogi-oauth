@@ -2,15 +2,21 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"crypto/rand"
-	"encoding/base64"
-
 	"github.com/redis/go-redis/v9"
 )
+
+func HashSessionID(sessionID string) string {
+	h := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(h[:8])
+}
 
 type OAuthFlowParams struct {
 	ClientID            string `json:"client_id"`
@@ -61,6 +67,15 @@ func (s *SessionStore) Create(ctx context.Context, data *SessionData) (string, e
 	if err := s.client.Set(ctx, "auth:session:"+sessionID, b, s.ttl).Err(); err != nil {
 		return "", fmt.Errorf("save session: %w", err)
 	}
+
+	if data.MemberID != "" {
+		memberSetKey := "auth:member_sessions:" + data.MemberID
+		if err := s.client.SAdd(ctx, memberSetKey, sessionID).Err(); err != nil {
+			return "", fmt.Errorf("track session: %w", err)
+		}
+		s.client.Expire(ctx, memberSetKey, s.ttl)
+	}
+
 	return sessionID, nil
 }
 
@@ -89,12 +104,91 @@ func (s *SessionStore) Update(ctx context.Context, sessionID string, data *Sessi
 	if err := s.client.Set(ctx, "auth:session:"+sessionID, b, s.ttl).Err(); err != nil {
 		return fmt.Errorf("update session: %w", err)
 	}
+	if data.MemberID != "" {
+		s.client.Expire(ctx, "auth:member_sessions:"+data.MemberID, s.ttl)
+	}
 	return nil
 }
 
 func (s *SessionStore) Delete(ctx context.Context, sessionID string) error {
+	data, _ := s.Get(ctx, sessionID)
 	if err := s.client.Del(ctx, "auth:session:"+sessionID).Err(); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
+	if data != nil && data.MemberID != "" {
+		s.client.SRem(ctx, "auth:member_sessions:"+data.MemberID, sessionID)
+	}
 	return nil
+}
+
+func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map[string]any, error) {
+	memberSetKey := "auth:member_sessions:" + memberID
+	sessionIDs, err := s.client.SMembers(ctx, memberSetKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list member sessions: %w", err)
+	}
+
+	if len(sessionIDs) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	keys := make([]string, len(sessionIDs))
+	for i, sid := range sessionIDs {
+		keys[i] = "auth:session:" + sid
+	}
+
+	vals, err := s.client.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("mget sessions: %w", err)
+	}
+
+	var sessions []map[string]any
+	var stale []string
+	for i, v := range vals {
+		if v == nil {
+			stale = append(stale, sessionIDs[i])
+			continue
+		}
+		var data SessionData
+		if err := json.Unmarshal([]byte(v.(string)), &data); err != nil {
+			stale = append(stale, sessionIDs[i])
+			continue
+		}
+		sessions = append(sessions, map[string]any{
+			"session_id":       HashSessionID(sessionIDs[i]),
+			"ip_address":       data.IPAddress,
+			"user_agent":       data.UserAgent,
+			"created_at":       data.CreatedAt,
+			"last_accessed_at": data.LastAccessedAt,
+		})
+	}
+
+	if len(stale) > 0 {
+		members := make([]any, len(stale))
+		for i, sid := range stale {
+			members[i] = sid
+		}
+		s.client.SRem(ctx, memberSetKey, members...)
+	}
+
+	return sessions, nil
+}
+
+func (s *SessionStore) DeleteByHashedID(ctx context.Context, hashedID, memberID string) error {
+	memberSetKey := "auth:member_sessions:" + memberID
+	sessionIDs, err := s.client.SMembers(ctx, memberSetKey).Result()
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
+	for _, sid := range sessionIDs {
+		if HashSessionID(sid) == hashedID {
+			if err := s.client.Del(ctx, "auth:session:"+sid).Err(); err != nil {
+				return fmt.Errorf("delete session: %w", err)
+			}
+			s.client.SRem(ctx, memberSetKey, sid)
+			return nil
+		}
+	}
+	return fmt.Errorf("session not found")
 }

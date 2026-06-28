@@ -45,6 +45,12 @@ export const api = {
   submitConsent: (approved: boolean, scopes: string[]) =>
     request<{ redirect_to: string }>('POST', '/oauth/consent', { approved, scopes }),
 
+  getSessions: () =>
+    request<{ sessions: any[] }>('GET', '/oauth/me/sessions'),
+
+  revokeSession: (sessionId: string) =>
+    request<void>('DELETE', `/oauth/me/sessions/${sessionId}`),
+
   getMyClients: () =>
     request<{ clients: any[]; total: number }>('GET', '/oauth/me/clients'),
 
@@ -62,7 +68,7 @@ export const api = {
     listMembers: (page = 1, perPage = 20) =>
       request<{ members: any[]; total: number; page: number; per_page: number }>('GET', `/oauth/admin/members?page=${page}&per_page=${perPage}`),
 
-    createMember: (data: { username: string; password: string; email: string }) =>
+    createMember: (data: { username: string; email: string; password?: string; must_change_password?: boolean }) =>
       request<any>('POST', '/oauth/admin/members', data),
 
     getMember: (id: string) =>
