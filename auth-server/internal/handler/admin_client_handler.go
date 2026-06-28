@@ -40,6 +40,7 @@ type createClientRequest struct {
 	RedirectURIs      []string `json:"redirect_uris"`
 	AllowedGrantTypes []string `json:"allowed_grant_types"`
 	Description       *string  `json:"description,omitempty"`
+	IconURL           *string  `json:"icon_url,omitempty"`
 }
 
 type createClientResponse struct {
@@ -84,7 +85,7 @@ func (h *AdminClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.clientStore.Create(r.Context(),
 		req.ClientID, req.Name, req.ClientType,
-		secretHash, req.Description,
+		secretHash, req.Description, req.IconURL,
 		req.RedirectURIs, req.AllowedGrantTypes, nil,
 	)
 	if err != nil {
@@ -92,7 +93,8 @@ func (h *AdminClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditStore.Log(r.Context(), model.ActionClientCreated, nil, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
+	operatorID := adminOperatorID(r)
+	h.auditStore.Log(r.Context(), model.ActionClientCreated, operatorID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
 
 	resp := createClientResponse{Client: client, ClientSecret: plainSecret}
 	writeJSON(w, http.StatusCreated, resp)
@@ -127,6 +129,8 @@ func (h *AdminClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Name              *string  `json:"name,omitempty"`
+		Description       *string  `json:"description,omitempty"`
+		IconURL           *string  `json:"icon_url,omitempty"`
 		RedirectURIs      []string `json:"redirect_uris,omitempty"`
 		AllowedGrantTypes []string `json:"allowed_grant_types,omitempty"`
 		IsActive          *bool    `json:"is_active,omitempty"`
@@ -136,12 +140,16 @@ func (h *AdminClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.clientStore.Update(r.Context(), id, req.Name, req.RedirectURIs, req.AllowedGrantTypes, req.IsActive); err != nil {
+	if err := h.clientStore.Update(r.Context(), id, req.Name, req.Description, req.IconURL, req.RedirectURIs, req.AllowedGrantTypes, req.IsActive); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update client")
 		return
 	}
 
 	client, _ := h.clientStore.GetByID(r.Context(), id)
+	if client != nil {
+		operatorID := adminOperatorID(r)
+		h.auditStore.Log(r.Context(), model.ActionClientUpdated, operatorID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
+	}
 	writeJSON(w, http.StatusOK, client)
 }
 
@@ -163,6 +171,44 @@ func (h *AdminClientHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditStore.Log(r.Context(), model.ActionClientDeleted, nil, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
+	operatorID := adminOperatorID(r)
+	h.auditStore.Log(r.Context(), model.ActionClientDeleted, operatorID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AdminClientHandler) RotateSecret(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid client ID")
+		return
+	}
+
+	client, err := h.clientStore.GetByID(r.Context(), id)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Client not found")
+		return
+	}
+	if client.ClientType != "confidential" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Only confidential clients have a client_secret")
+		return
+	}
+
+	secret, err := oauth.GenerateRandomString(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate secret")
+		return
+	}
+	hash := oauth.HashClientSecret(secret)
+	if err := h.clientStore.UpdateSecret(r.Context(), id, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to rotate client secret")
+		return
+	}
+
+	operatorID := adminOperatorID(r)
+	h.auditStore.Log(r.Context(), model.ActionClientSecretRotated, operatorID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"client_id":     client.ClientID,
+		"client_secret": secret,
+		"message":       "Client secret has been rotated. The old secret is no longer valid.",
+	})
 }

@@ -22,6 +22,7 @@ pub struct Jwk {
     pub y: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Claims {
     pub iss: Option<String>,
@@ -72,6 +73,9 @@ impl JwksCache {
             if jwk.kty != "EC" {
                 continue;
             }
+            if jwk.alg.as_deref() != Some("ES256") || jwk.crv.as_deref() != Some("P-256") {
+                continue;
+            }
             let kid = match &jwk.kid {
                 Some(k) => k.clone(),
                 None => continue,
@@ -115,9 +119,24 @@ pub async fn verify_token(
     cache: &Arc<RwLock<JwksCache>>,
     issuer: &str,
 ) -> Result<Claims, String> {
-    let header = jsonwebtoken::decode_header(token).map_err(|e| format!("Invalid JWT header: {e}"))?;
+    let header =
+        jsonwebtoken::decode_header(token).map_err(|e| format!("Invalid JWT header: {e}"))?;
 
     let kid = header.kid.ok_or("JWT missing kid")?;
+
+    {
+        let cache_read = cache.read().await;
+        if cache_read.is_expired() {
+            drop(cache_read);
+            let mut cache_write = cache.write().await;
+            if cache_write.is_expired() {
+                cache_write
+                    .refresh()
+                    .await
+                    .map_err(|e| format!("Failed to refresh JWKS: {e}"))?;
+            }
+        }
+    }
 
     let cache_read = cache.read().await;
     let key = match cache_read.get_key(&kid) {

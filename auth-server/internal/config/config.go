@@ -16,6 +16,8 @@ type Config struct {
 
 	JWTPrivateKeyPath string
 	JWTPublicKeyPath  string
+	JWTKeysDir        string
+	JWTActiveKID      string
 	JWTIssuer         string
 	JWTKID            string
 	AccessTokenTTL    time.Duration
@@ -50,6 +52,8 @@ func Load() (*Config, error) {
 
 		JWTPrivateKeyPath: os.Getenv("AUTH_JWT_PRIVATE_KEY_PATH"),
 		JWTPublicKeyPath:  os.Getenv("AUTH_JWT_PUBLIC_KEY_PATH"),
+		JWTKeysDir:        os.Getenv("AUTH_JWT_KEYS_DIR"),
+		JWTActiveKID:      envOrDefault("AUTH_JWT_ACTIVE_KID", os.Getenv("AUTH_JWT_KID")),
 		JWTIssuer:         envOrDefault("AUTH_JWT_ISSUER", "https://oauth.example.internal"),
 		JWTKID:            envOrDefault("AUTH_JWT_KID", "key-1"),
 		AccessTokenTTL:    time.Duration(envOrDefaultInt("AUTH_JWT_ACCESS_TOKEN_TTL", 900)) * time.Second,
@@ -79,6 +83,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.RedisURL == "" {
 		return nil, fmt.Errorf("AUTH_REDIS_URL is required")
+	}
+	if cfg.JWTActiveKID == "" {
+		cfg.JWTActiveKID = cfg.JWTKID
+	}
+	if cfg.JWTKeysDir != "" {
+		if cfg.JWTActiveKID == "" {
+			return nil, fmt.Errorf("AUTH_JWT_ACTIVE_KID is required when AUTH_JWT_KEYS_DIR is set")
+		}
+		return cfg, nil
 	}
 	if cfg.JWTPrivateKeyPath == "" {
 		return nil, fmt.Errorf("AUTH_JWT_PRIVATE_KEY_PATH is required")

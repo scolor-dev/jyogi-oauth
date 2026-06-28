@@ -92,20 +92,19 @@ func (s *MemberStore) List(ctx context.Context, page, perPage int) ([]model.Memb
 }
 
 func (s *MemberStore) Update(ctx context.Context, id uuid.UUID, username, email *string, isActive *bool) error {
-	if username != nil {
-		if _, err := s.pool.Exec(ctx, `UPDATE auth.members SET username = $1 WHERE id = $2`, *username, id); err != nil {
-			return fmt.Errorf("update username: %w", err)
-		}
-	}
-	if email != nil {
-		if _, err := s.pool.Exec(ctx, `UPDATE auth.members SET email = $1 WHERE id = $2`, *email, id); err != nil {
-			return fmt.Errorf("update email: %w", err)
-		}
-	}
-	if isActive != nil {
-		if _, err := s.pool.Exec(ctx, `UPDATE auth.members SET is_active = $1 WHERE id = $2`, *isActive, id); err != nil {
-			return fmt.Errorf("update is_active: %w", err)
-		}
+	usernameVal := nullableString(username)
+	emailVal := nullableString(email)
+	isActiveVal := nullableBool(isActive)
+	_, err := s.pool.Exec(ctx,
+		`UPDATE auth.members SET
+			username = COALESCE($2, username),
+			email = COALESCE($3, email),
+			is_active = COALESCE($4, is_active)
+		 WHERE id = $1`,
+		id, usernameVal, emailVal, isActiveVal,
+	)
+	if err != nil {
+		return fmt.Errorf("update member: %w", err)
 	}
 	return nil
 }

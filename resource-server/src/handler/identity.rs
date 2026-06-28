@@ -1,14 +1,15 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Deserialize;
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 use crate::auth::{self, AppState};
 use crate::db;
 
-pub async fn get_my_identity(
-    req: HttpRequest,
-    state: web::Data<AppState>,
-) -> HttpResponse {
+static HEX_COLOR_RE: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r"^#[0-9A-Fa-f]{6}$").expect("valid hex color regex"));
+
+pub async fn get_my_identity(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
     let claims = match auth::extract_and_verify(&req, &state).await {
         Ok(c) => c,
         Err(e) => return e,
@@ -64,7 +65,7 @@ pub async fn upsert_my_identity(
         Err(e) => return e,
     };
 
-    if body.display_name.is_empty() || body.display_name.len() > 100 {
+    if body.display_name.is_empty() || body.display_name.chars().count() > 100 {
         return HttpResponse::BadRequest().json(serde_json::json!({
             "error": {"code": "validation_error", "message": "display_name must be 1-100 characters"}
         }));
@@ -78,8 +79,7 @@ pub async fn upsert_my_identity(
         }
     }
 
-    let color_re = regex_lite::Regex::new(r"^#[0-9A-Fa-f]{6}$").unwrap();
-    if !color_re.is_match(&body.theme_color) {
+    if !HEX_COLOR_RE.is_match(&body.theme_color) {
         return HttpResponse::BadRequest().json(serde_json::json!({
             "error": {"code": "validation_error", "message": "theme_color must be a hex color code (#RRGGBB)"}
         }));
@@ -152,12 +152,30 @@ pub async fn get_batch_identities(
         return e;
     }
 
-    let ids: Vec<Uuid> = query
+    let raw_ids: Vec<&str> = query
         .ids
         .split(',')
-        .filter_map(|s| Uuid::parse_str(s.trim()).ok())
-        .take(50)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
         .collect();
+
+    if raw_ids.len() > 50 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": {"code": "validation_error", "message": "ids must contain at most 50 member IDs"}
+        }));
+    }
+
+    let mut ids = Vec::with_capacity(raw_ids.len());
+    for raw_id in raw_ids {
+        match Uuid::parse_str(raw_id) {
+            Ok(id) => ids.push(id),
+            Err(_) => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": {"code": "validation_error", "message": "ids must be comma-separated UUIDs"}
+                }));
+            }
+        }
+    }
 
     if ids.is_empty() {
         return HttpResponse::Ok().json(serde_json::json!({"data": []}));

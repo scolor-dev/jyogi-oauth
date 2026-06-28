@@ -20,7 +20,7 @@ pub async fn health(state: web::Data<AppState>) -> HttpResponse {
         serde_json::json!({
             "status": status,
             "service": "resource-server",
-            "version": "0.1.0",
+            "version": "0.2.2",
             "dependencies": {
                 "postgresql": pg_status
             }

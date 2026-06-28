@@ -1,21 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 
-const router = useRouter()
 const auth = useAuthStore()
-
-onMounted(async () => {
-  if (!auth.loaded) await auth.fetchMe()
-  if (!auth.isLoggedIn()) {
-    router.push('/login')
-    return
-  }
-  if (auth.member?.role !== 'admin' && auth.member?.role !== 'moderator') {
-    router.push('/dashboard')
-  }
-})
 </script>
 
 <template>
@@ -26,6 +12,8 @@ onMounted(async () => {
         <router-link to="/admin" exact-active-class="active">Overview</router-link>
         <router-link to="/admin/members" active-class="active">Members</router-link>
         <router-link v-if="auth.member?.role === 'admin'" to="/admin/clients" active-class="active">Clients</router-link>
+        <router-link v-if="auth.member?.role === 'admin'" to="/admin/scopes" active-class="active">Scopes</router-link>
+        <router-link to="/admin/audit-logs" active-class="active">Audit Logs</router-link>
       </nav>
     </aside>
     <main class="admin-main">

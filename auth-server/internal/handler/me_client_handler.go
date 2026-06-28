@@ -46,6 +46,7 @@ type createMyClientRequest struct {
 	RedirectURIs      []string `json:"redirect_uris"`
 	AllowedGrantTypes []string `json:"allowed_grant_types"`
 	Description       *string  `json:"description,omitempty"`
+	IconURL           *string  `json:"icon_url,omitempty"`
 }
 
 func (h *MeClientHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +89,7 @@ func (h *MeClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.clientStore.Create(r.Context(),
 		clientID, req.Name, req.ClientType,
-		secretHash, req.Description,
+		secretHash, req.Description, req.IconURL,
 		req.RedirectURIs, req.AllowedGrantTypes, &memberID,
 	)
 	if err != nil {
@@ -132,13 +133,14 @@ func (h *MeClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		RedirectURIs      []string `json:"redirect_uris,omitempty"`
 		AllowedGrantTypes []string `json:"allowed_grant_types,omitempty"`
 		Description       *string  `json:"description,omitempty"`
+		IconURL           *string  `json:"icon_url,omitempty"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
 		return
 	}
 
-	if err := h.clientStore.Update(r.Context(), id, req.Name, req.RedirectURIs, req.AllowedGrantTypes, nil); err != nil {
+	if err := h.clientStore.Update(r.Context(), id, req.Name, req.Description, req.IconURL, req.RedirectURIs, req.AllowedGrantTypes, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update client")
 		return
 	}
@@ -176,4 +178,49 @@ func (h *MeClientHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	h.auditStore.Log(r.Context(), model.ActionClientDeleted, &memberID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *MeClientHandler) RotateSecret(w http.ResponseWriter, r *http.Request) {
+	memberID, ok := h.requireMember(w, r)
+	if !ok {
+		return
+	}
+
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid client ID")
+		return
+	}
+
+	client, err := h.clientStore.GetByID(r.Context(), id)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Client not found")
+		return
+	}
+	if client.CreatedBy == nil || *client.CreatedBy != memberID {
+		writeError(w, http.StatusForbidden, "forbidden", "You can only rotate your own clients")
+		return
+	}
+	if client.ClientType != "confidential" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Only confidential clients have a client_secret")
+		return
+	}
+
+	secret, err := oauth.GenerateRandomString(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate secret")
+		return
+	}
+	hash := oauth.HashClientSecret(secret)
+	if err := h.clientStore.UpdateSecret(r.Context(), id, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to rotate client secret")
+		return
+	}
+
+	h.auditStore.Log(r.Context(), model.ActionClientSecretRotated, &memberID, &client.ClientID, r.RemoteAddr, r.UserAgent(), nil)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"client_id":     client.ClientID,
+		"client_secret": secret,
+		"message":       "Client secret has been rotated. The old secret is no longer valid.",
+	})
 }

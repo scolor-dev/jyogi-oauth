@@ -214,7 +214,7 @@ Content-Type: application/json
 Cache-Control: no-store
 
 {
-  &quot;access_token&quot;: &quot;eyJhbGciOiJSUzI1NiIs...&quot;,
+  &quot;access_token&quot;: &quot;eyJhbGciOiJFUzI1NiIs...&quot;,
   &quot;token_type&quot;: &quot;Bearer&quot;,
   &quot;expires_in&quot;: 900,
   &quot;refresh_token&quot;: &quot;dGhpcyBpcyBhIHJlZnJlc2g...&quot;,
@@ -297,7 +297,7 @@ Cache-Control: no-store
 </table>
 <p><strong>成功レスポンス:</strong></p>
 <pre><code class="language-json">{
-  &quot;access_token&quot;: &quot;eyJhbGciOiJSUzI1NiIs...&quot;,
+  &quot;access_token&quot;: &quot;eyJhbGciOiJFUzI1NiIs...&quot;,
   &quot;token_type&quot;: &quot;Bearer&quot;,
   &quot;expires_in&quot;: 900,
   &quot;scope&quot;: &quot;read&quot;
@@ -529,6 +529,8 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <tbody>
 <tr><td><code>/oauth/admin/members/*</code></td><td>moderator 以上</td></tr>
 <tr><td><code>/oauth/admin/clients/*</code></td><td>admin のみ</td></tr>
+<tr><td><code>/oauth/admin/scopes/*</code></td><td>admin のみ</td></tr>
+<tr><td><code>/oauth/admin/audit-logs</code></td><td>moderator 以上</td></tr>
 </tbody>
 </table>
 <p>ロール変更（<code>PUT /oauth/admin/members/{id}</code> の <code>role</code> フィールド）は admin のみ実行可能。</p>
@@ -623,6 +625,13 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 </code></pre>
 <h4>DELETE /oauth/admin/clients/{id}</h4>
 <p>クライアントを削除する（論理削除: is_active = false）。</p>
+<h4><span class="method method-post">POST</span> /oauth/admin/clients/{id}/rotate-secret</h4>
+<p>confidential クライアントの <code>client_secret</code> を再発行する。新しい secret はこのレスポンスでのみ表示され、既存 secret は無効になる。</p>
+<pre><code class="language-json">{
+  "client_id": "my-app",
+  "client_secret": "new-secret-shown-only-once",
+  "message": "Client secret rotated. Store it securely; it will not be shown again."
+}</code></pre>
 <h3>メンバー管理</h3>
 <h4>GET /oauth/admin/members</h4>
 <p>メンバー一覧を取得する。</p>
@@ -650,18 +659,46 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 }</code></pre>
 <p>一時パスワードはこのレスポンスでのみ表示。メンバーは次回ログイン時にパスワード変更を強制される（<code>must_change_password = true</code>）。</p>
 
-<h3>スコープ管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
-<p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。スコープは現在マイグレーションの初期データで管理。</p>
+<h3>スコープ管理</h3>
+<p>OAuth スコープを管理する。追加・変更・削除は監査ログに記録される。</p>
 <h4>GET /oauth/admin/scopes</h4>
+<pre><code class="language-json">{
+  "scopes": [
+    { "id": "uuid", "name": "profile", "description": "Profile information", "is_default": true, "created_at": "..." }
+  ],
+  "total": 1
+}</code></pre>
 <h4>POST /oauth/admin/scopes</h4>
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;read&quot;,
-  &quot;description&quot;: &quot;リソースの読み取り権限&quot;
+  &quot;description&quot;: &quot;リソースの読み取り権限&quot;,
+  &quot;is_default&quot;: false
 }
 </code></pre>
 <h4>PUT /oauth/admin/scopes/{id}</h4>
 <h4>DELETE /oauth/admin/scopes/{id}</h4>
+<h3>監査ログ</h3>
+<h4><span class="method method-get">GET</span> /oauth/admin/audit-logs</h4>
+<p>監査ログを新しい順に取得する。必要ロール: moderator 以上。</p>
+<p><strong>クエリパラメータ:</strong> <code>page</code>, <code>per_page</code>, <code>action</code>, <code>member_id</code>, <code>from</code>, <code>to</code>。<code>from</code>/<code>to</code> は RFC3339。</p>
+<pre><code class="language-json">{
+  "items": [
+    {
+      "id": "uuid",
+      "member_id": "uuid",
+      "client_id": "client-id",
+      "action": "client_secret_rotated",
+      "ip_address": "127.0.0.1",
+      "user_agent": "...",
+      "details": { "client_id": "my-app" },
+      "created_at": "..."
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 20
+}</code></pre>
 <h3>トークン管理 <span style="color:#888;font-size:0.8rem;font-weight:normal">（未実装・予定）</span></h3>
 <p style="color:#888;font-size:0.9rem">以下のエンドポイントは設計済みだが未実装。トークン失効は <code>POST /oauth/revoke</code> で対応。</p>
 <h4>GET /oauth/admin/tokens</h4>
@@ -855,7 +892,8 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   "client_type": "public",
   "redirect_uris": ["http://localhost:3000/callback"],
   "allowed_grant_types": ["authorization_code"],
-  "description": "optional description"
+  "description": "optional description",
+  "icon_url": "https://example.com/icon.png"
 }</code></pre>
 <p><strong>成功レスポンス (201):</strong></p>
 <pre><code class="language-json">{
@@ -869,11 +907,16 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   "name": "Updated Name",
+  "description": "Updated description",
+  "icon_url": "https://example.com/icon.png",
   "redirect_uris": ["http://new-uri/callback"]
 }</code></pre>
 
 <h3><span class="method method-delete">DELETE</span> /oauth/me/clients/{id}</h3>
 <p>自分のクライアントを削除する（論理削除）。他メンバーのクライアントは 403。</p>
+
+<h3><span class="method method-post">POST</span> /oauth/me/clients/{id}/rotate-secret</h3>
+<p>自分が所有する confidential クライアントの <code>client_secret</code> を再発行する。新しい secret はこのレスポンスでのみ表示される。</p>
 
 <hr />
 <h2>共通エラーフォーマット</h2>

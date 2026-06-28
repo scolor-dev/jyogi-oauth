@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api'
+import type { Identity, Member } from '../types'
 
 export const useAuthStore = defineStore('auth', () => {
-  const member = ref<any>(null)
-  const identity = ref<any>(null)
+  const member = ref<Member | null>(null)
+  const identity = ref<Identity | null>(null)
   const loaded = ref(false)
 
   async function fetchMe() {

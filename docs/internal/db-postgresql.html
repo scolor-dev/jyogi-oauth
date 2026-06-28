@@ -149,6 +149,7 @@ auth スキーマは認証に必要な最小限の情報のみ保持する。</p
     client_secret_hash VARCHAR(255),
     name               VARCHAR(255) NOT NULL,
     description        TEXT,
+    icon_url           TEXT,
     client_type        VARCHAR(50) NOT NULL DEFAULT 'confidential',
     redirect_uris      TEXT[] NOT NULL,
     allowed_grant_types TEXT[] NOT NULL DEFAULT '{authorization_code}',
@@ -202,6 +203,12 @@ CREATE INDEX idx_clients_is_active ON auth.clients (is_active);
 <td>TEXT</td>
 <td></td>
 <td>アプリケーション説明</td>
+</tr>
+<tr>
+<td>icon_url</td>
+<td>TEXT</td>
+<td></td>
+<td>同意画面・管理画面に表示するアプリケーションアイコン URL</td>
 </tr>
 <tr>
 <td>client_type</td>
@@ -502,6 +509,22 @@ CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
 <td>クライアント削除</td>
 </tr>
 <tr>
+<td><code>client_secret_rotated</code></td>
+<td>クライアントシークレット再発行</td>
+</tr>
+<tr>
+<td><code>scope_created</code></td>
+<td>スコープ作成</td>
+</tr>
+<tr>
+<td><code>scope_updated</code></td>
+<td>スコープ更新</td>
+</tr>
+<tr>
+<td><code>scope_deleted</code></td>
+<td>スコープ削除</td>
+</tr>
+<tr>
 <td><code>member_created</code></td>
 <td>メンバー作成</td>
 </tr>
@@ -516,73 +539,6 @@ CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
 <tr>
 <td><code>password_reset</code></td>
 <td>管理者によるパスワードリセット（details に target_username を記録）</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h3>auth.signing_keys</h3>
-<p>JWT 署名鍵の管理。鍵ローテーションに対応。</p>
-<pre><code class="language-sql">CREATE TABLE auth.signing_keys (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kid         VARCHAR(100) NOT NULL UNIQUE,
-    algorithm   VARCHAR(10) NOT NULL DEFAULT 'ES256',
-    public_key  TEXT NOT NULL,
-    private_key TEXT NOT NULL,
-    is_active   BOOLEAN NOT NULL DEFAULT true,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ,
-
-    CONSTRAINT chk_algorithm CHECK (algorithm IN ('ES256', 'RS256'))
-);
-</code></pre>
-<table>
-<thead>
-<tr>
-<th>カラム</th>
-<th>型</th>
-<th>説明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>id</td>
-<td>UUID</td>
-<td>主キー</td>
-</tr>
-<tr>
-<td>kid</td>
-<td>VARCHAR(100)</td>
-<td>Key ID（JWT ヘッダーの kid に対応）</td>
-</tr>
-<tr>
-<td>algorithm</td>
-<td>VARCHAR(10)</td>
-<td>署名アルゴリズム（デフォルト: ES256）</td>
-</tr>
-<tr>
-<td>public_key</td>
-<td>TEXT</td>
-<td>PEM 形式の公開鍵</td>
-</tr>
-<tr>
-<td>private_key</td>
-<td>TEXT</td>
-<td>PEM 形式の秘密鍵（暗号化して保存）</td>
-</tr>
-<tr>
-<td>is_active</td>
-<td>BOOLEAN</td>
-<td>現在使用中か</td>
-</tr>
-<tr>
-<td>created_at</td>
-<td>TIMESTAMPTZ</td>
-<td>作成日時</td>
-</tr>
-<tr>
-<td>expires_at</td>
-<td>TIMESTAMPTZ</td>
-<td>有効期限</td>
 </tr>
 </tbody>
 </table>
@@ -704,17 +660,6 @@ CREATE UNIQUE INDEX idx_member_identities_member_id ON resource.member_identitie
        │           │ client_id    │
        │           │ action       │
        │           └──────────────┘
-       │
-       │          ┌──────────────┐
-       │          │ signing_keys │
-       │          │──────────────│
-       │          │ id (PK)      │
-       │          │ kid          │
-       │          │ public_key   │
-       │          │ private_key  │
-       │          └──────────────┘
-
-
 resource スキーマ:
 
   ┌──────────────────────┐

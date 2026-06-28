@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jyogi-oauth/auth-server/internal/config"
 	"github.com/jyogi-oauth/auth-server/internal/middleware"
@@ -83,6 +83,19 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	requestedScopes := splitScopes(scope)
+	if len(requestedScopes) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_scope", "scope is required")
+		return
+	}
+	if ok, err := h.scopesExist(r.Context(), requestedScopes); err != nil {
+		writeError(w, http.StatusInternalServerError, "server_error", "Failed to validate scopes")
+		return
+	} else if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_scope", "Unknown scope requested")
+		return
+	}
+
 	session := middleware.GetSession(r.Context())
 	oauthParams := &store.OAuthFlowParams{
 		ClientID:            clientID,
@@ -140,7 +153,6 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestedScopes := strings.Split(scope, " ")
 	if consent != nil && scopesCovered(consent.Scopes, requestedScopes) {
 		// Already consented: issue auth code and redirect to client
 		h.issueAuthCodeAndRedirect(w, r, client.ClientID, memberID.String(), redirectURI, scope, codeChallenge, codeChallengeMethod, state, nonce)
@@ -152,6 +164,14 @@ func (h *AuthorizeHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	session.OAuthParams = oauthParams
 	h.sessionStore.Update(r.Context(), sessionID, session)
 	http.Redirect(w, r, "/consent", http.StatusFound)
+}
+
+func (h *AuthorizeHandler) scopesExist(ctx context.Context, scopes []string) (bool, error) {
+	found, err := h.scopeStore.GetByNames(ctx, scopes)
+	if err != nil {
+		return false, err
+	}
+	return len(found) == len(scopes), nil
 }
 
 func (h *AuthorizeHandler) issueAuthCodeAndRedirect(w http.ResponseWriter, r *http.Request, clientID, memberID, redirectURI, scope, codeChallenge, codeChallengeMethod, state, nonce string) {

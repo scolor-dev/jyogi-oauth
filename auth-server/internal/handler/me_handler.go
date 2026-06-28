@@ -9,18 +9,22 @@ import (
 )
 
 type MeHandler struct {
-	memberStore      *store.MemberStore
-	sessionStore     *store.SessionStore
-	identityHandler  *MeIdentityHandler
-	cookieName       string
+	memberStore     *store.MemberStore
+	sessionStore    *store.SessionStore
+	identityHandler *MeIdentityHandler
+	cookieName      string
+	cookieSecure    bool
+	cookieDomain    string
 }
 
-func NewMeHandler(memberStore *store.MemberStore, sessionStore *store.SessionStore, pool *pgxpool.Pool, cookieName string) *MeHandler {
+func NewMeHandler(memberStore *store.MemberStore, sessionStore *store.SessionStore, pool *pgxpool.Pool, cookieName string, cookieSecure bool, cookieDomain string) *MeHandler {
 	return &MeHandler{
 		memberStore:     memberStore,
 		sessionStore:    sessionStore,
 		identityHandler: NewMeIdentityHandler(pool),
 		cookieName:      cookieName,
+		cookieSecure:    cookieSecure,
+		cookieDomain:    cookieDomain,
 	}
 }
 
@@ -54,8 +58,10 @@ func (h *MeHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Name:     h.cookieName,
 		Value:    "",
 		Path:     "/oauth",
+		Domain:   h.cookieDomain,
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   h.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 

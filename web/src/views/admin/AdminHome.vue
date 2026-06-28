@@ -21,6 +21,16 @@ const auth = useAuthStore()
         <div class="card-label">Clients</div>
         <div class="card-desc">全OAuthクライアントの管理</div>
       </router-link>
+      <router-link v-if="auth.member?.role === 'admin'" to="/admin/scopes" class="overview-card">
+        <div class="card-icon">☑</div>
+        <div class="card-label">Scopes</div>
+        <div class="card-desc">OAuthスコープの追加・編集</div>
+      </router-link>
+      <router-link to="/admin/audit-logs" class="overview-card">
+        <div class="card-icon">◎</div>
+        <div class="card-label">Audit Logs</div>
+        <div class="card-desc">管理操作と認証イベントの確認</div>
+      </router-link>
     </div>
   </div>
 </template>

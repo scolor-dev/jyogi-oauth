@@ -187,7 +187,7 @@
   <div class="flow-num">11</div>
   <div class="flow-content">
     <div class="flow-actors"><span class="actor actor-client">Client</span> → <span class="actor actor-rust">Rust</span></div>
-    <code>GET /api/resource</code> &mdash; <code>Authorization: Bearer &lt;access_token&gt;</code>
+    <code>GET /api/v1/members/me/identity</code> &mdash; <code>Authorization: Bearer &lt;access_token&gt;</code>
   </div>
 </div>
 <div class="flow-step">
@@ -247,6 +247,8 @@
 <tr><td>client_id</td><td>VARCHAR(255)</td><td>OAuth クライアント ID</td></tr>
 <tr><td>client_secret_hash</td><td>VARCHAR(255)</td><td>シークレットのハッシュ</td></tr>
 <tr><td>name</td><td>VARCHAR(255)</td><td>アプリ名</td></tr>
+<tr><td>description</td><td>TEXT</td><td>アプリ説明</td></tr>
+<tr><td>icon_url</td><td>TEXT</td><td>アプリアイコンURL</td></tr>
 <tr><td>redirect_uris</td><td>TEXT[]</td><td>許可されたリダイレクト URI</td></tr>
 <tr><td>allowed_grant_types</td><td>TEXT[]</td><td>許可された grant type</td></tr>
 <tr><td>client_type</td><td>VARCHAR(50)</td><td>confidential / public</td></tr>
@@ -314,6 +316,7 @@
 <tr><td><code>POST</code></td><td>/oauth/me/clients</td><td>クライアント作成</td></tr>
 <tr><td><code>PUT</code></td><td>/oauth/me/clients/{id}</td><td>クライアント更新</td></tr>
 <tr><td><code>DELETE</code></td><td>/oauth/me/clients/{id}</td><td>クライアント削除</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/me/clients/{id}/rotate-secret</td><td>クライアントシークレット再発行</td></tr>
 </tbody>
 </table>
 
@@ -323,6 +326,8 @@
 <tbody>
 <tr><td><code>CRUD</code></td><td>/oauth/admin/members</td><td>メンバー管理</td></tr>
 <tr><td><code>CRUD</code></td><td>/oauth/admin/clients</td><td>クライアント管理</td></tr>
+<tr><td><code>CRUD</code></td><td>/oauth/admin/scopes</td><td>スコープ管理</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/admin/audit-logs</td><td>監査ログ閲覧</td></tr>
 </tbody>
 </table>
 <p><strong>依存:</strong> Redis（トークン・セッション）、PostgreSQL（メンバー認証・クライアント検証）</p>
@@ -354,7 +359,9 @@
 <tr><td>/dashboard</td><td>ダッシュボード</td><td>3タブ構成（下記参照）</td></tr>
 <tr><td>/admin</td><td>管理画面トップ</td><td>moderator / admin のみ表示</td></tr>
 <tr><td>/admin/members</td><td>メンバー管理</td><td>一覧・作成・ロール変更・有効/無効切替</td></tr>
-<tr><td>/admin/clients</td><td>クライアント管理</td><td>全クライアント一覧・無効化（admin のみ）</td></tr>
+<tr><td>/admin/clients</td><td>クライアント管理</td><td>全クライアント一覧・無効化・secret再発行（admin のみ）</td></tr>
+<tr><td>/admin/scopes</td><td>スコープ管理</td><td>スコープの作成・編集・削除（admin のみ）</td></tr>
+<tr><td>/admin/audit-logs</td><td>監査ログ</td><td>認証・管理操作ログの閲覧（moderator 以上）</td></tr>
 </tbody>
 </table>
 <h4>ダッシュボード タブ（/dashboard）</h4>
@@ -363,7 +370,7 @@
 <tbody>
 <tr><td>Profile</td><td>表示名・アバターURL・テーマカラーの編集、リアルタイムプレビュー</td></tr>
 <tr><td>Connected Apps</td><td>自分が許可した連携アプリ一覧、スコープ表示、アクセス取り消し</td></tr>
-<tr><td>My Clients</td><td>自分のOAuthクライアント作成・管理、client_secret の一度きり表示</td></tr>
+<tr><td>My Clients</td><td>自分のOAuthクライアント作成・管理、アイコン/説明編集、client_secret の一度きり表示・再発行</td></tr>
 </tbody>
 </table>
 <h4>管理画面（/admin）</h4>
@@ -372,7 +379,9 @@
 <tbody>
 <tr><td>Overview</td><td>moderator+</td><td>管理メニュー</td></tr>
 <tr><td>Members</td><td>moderator+</td><td>メンバー一覧、作成、有効/無効化、パスワードリセット。ロール変更は admin のみ</td></tr>
-<tr><td>Clients</td><td>admin</td><td>全クライアント一覧、無効化</td></tr>
+<tr><td>Clients</td><td>admin</td><td>全クライアント一覧、無効化、secret再発行</td></tr>
+<tr><td>Scopes</td><td>admin</td><td>OAuth スコープ管理</td></tr>
+<tr><td>Audit Logs</td><td>moderator+</td><td>監査ログ閲覧</td></tr>
 </tbody>
 </table>
 
@@ -453,7 +462,7 @@
 ├── <span class="tree-dir">web/</span> <span class="tree-comment">— Vue SPA フロントエンド</span><br>
 ├── <span class="tree-dir">migrations/</span> <span class="tree-comment">— PostgreSQL マイグレーション</span><br>
 ├── <span class="tree-dir">nginx/</span> <span class="tree-comment">— Nginx 設定</span><br>
-├── <span class="tree-dir">config/</span> <span class="tree-comment">— .env.dev / .env.prod</span><br>
+├── <span class="tree-dir">config/</span> <span class="tree-comment">— .env.dev / .env.prod.example</span><br>
 ├── <span class="tree-dir">keys/</span> <span class="tree-comment">— ES256 鍵ペア</span><br>
 └── <span class="tree-file">docker-compose.yml</span>
 </div>

@@ -88,11 +88,10 @@ Retry-After: 30
 
 {
   &quot;status&quot;: &quot;healthy&quot;,
-  &quot;version&quot;: &quot;0.1.0&quot;,
-  &quot;uptime_seconds&quot;: 86400,
+  &quot;service&quot;: &quot;resource-server&quot;,
+  &quot;version&quot;: &quot;0.2.2&quot;,
   &quot;dependencies&quot;: {
-    &quot;postgresql&quot;: &quot;connected&quot;,
-    &quot;auth_server&quot;: &quot;reachable&quot;
+    &quot;postgresql&quot;: &quot;connected&quot;
   }
 }
 </code></pre>
@@ -101,9 +100,10 @@ Retry-After: 30
 
 {
   &quot;status&quot;: &quot;unhealthy&quot;,
+  &quot;service&quot;: &quot;resource-server&quot;,
+  &quot;version&quot;: &quot;0.2.2&quot;,
   &quot;dependencies&quot;: {
-    &quot;postgresql&quot;: &quot;disconnected&quot;,
-    &quot;auth_server&quot;: &quot;unreachable&quot;
+    &quot;postgresql&quot;: &quot;disconnected&quot;
   }
 }
 </code></pre>

@@ -8,19 +8,23 @@ import (
 )
 
 const (
-	ActionLoginSuccess     = "login_success"
-	ActionLoginFailure     = "login_failure"
-	ActionConsentGranted   = "consent_granted"
-	ActionConsentRevoked   = "consent_revoked"
-	ActionTokenIssued      = "token_issued"
-	ActionTokenRevoked     = "token_revoked"
-	ActionClientCreated    = "client_created"
-	ActionClientUpdated    = "client_updated"
-	ActionClientDeleted    = "client_deleted"
-	ActionMemberCreated    = "member_created"
-	ActionMemberUpdated    = "member_updated"
-	ActionMemberDeactivated = "member_deactivated"
-	ActionSessionRevoked    = "session_revoked"
+	ActionLoginSuccess        = "login_success"
+	ActionLoginFailure        = "login_failure"
+	ActionConsentGranted      = "consent_granted"
+	ActionConsentRevoked      = "consent_revoked"
+	ActionTokenIssued         = "token_issued"
+	ActionTokenRevoked        = "token_revoked"
+	ActionClientCreated       = "client_created"
+	ActionClientUpdated       = "client_updated"
+	ActionClientDeleted       = "client_deleted"
+	ActionClientSecretRotated = "client_secret_rotated"
+	ActionScopeCreated        = "scope_created"
+	ActionScopeUpdated        = "scope_updated"
+	ActionScopeDeleted        = "scope_deleted"
+	ActionMemberCreated       = "member_created"
+	ActionMemberUpdated       = "member_updated"
+	ActionMemberDeactivated   = "member_deactivated"
+	ActionSessionRevoked      = "session_revoked"
 )
 
 type AuditLog struct {

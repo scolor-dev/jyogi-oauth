@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/jyogi-oauth/auth-server/internal/config"
 	"github.com/jyogi-oauth/auth-server/internal/middleware"
@@ -70,8 +72,10 @@ func (h *ConsentHandler) Info(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"client_name":      client.Name,
-		"requested_scopes": scopeInfos,
+		"client_name":        client.Name,
+		"client_icon_url":    client.IconURL,
+		"client_description": client.Description,
+		"requested_scopes":   scopeInfos,
 	})
 }
 
@@ -134,13 +138,34 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.consentStore.Upsert(r.Context(), memberID, client.ID, req.Scopes); err != nil {
+	requestedScopes := splitScopes(params.Scope)
+	approvedScopes := requestedScopes
+	if len(req.Scopes) > 0 {
+		approvedScopes = normalizeScopes(req.Scopes)
+	}
+	if len(approvedScopes) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_scope", "At least one scope must be approved")
+		return
+	}
+	if !scopesCovered(requestedScopes, approvedScopes) {
+		writeError(w, http.StatusBadRequest, "invalid_scope", "Approved scopes must be a subset of the original request")
+		return
+	}
+	if ok, err := h.scopesExist(r.Context(), approvedScopes); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate scopes")
+		return
+	} else if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_scope", "Unknown scope requested")
+		return
+	}
+
+	if err := h.consentStore.Upsert(r.Context(), memberID, client.ID, approvedScopes); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save consent")
 		return
 	}
 
 	h.auditStore.Log(r.Context(), model.ActionConsentGranted, &memberID, &params.ClientID, r.RemoteAddr, r.UserAgent(), map[string]any{
-		"scopes": req.Scopes,
+		"scopes": approvedScopes,
 	})
 
 	code, err := oauth.GenerateRandomString(h.cfg.CodeLength)
@@ -150,8 +175,8 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scope := params.Scope
-	if len(req.Scopes) > 0 {
-		scope = joinScopes(req.Scopes)
+	if len(approvedScopes) > 0 {
+		scope = joinScopes(approvedScopes)
 	}
 
 	var authTime int64
@@ -193,41 +218,31 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 }
 
 func splitScopes(scope string) []string {
-	var scopes []string
-	for _, s := range splitBySpace(scope) {
-		if s != "" {
-			scopes = append(scopes, s)
-		}
-	}
-	return scopes
+	return strings.Fields(scope)
 }
 
-func splitBySpace(s string) []string {
-	var result []string
-	current := ""
-	for _, c := range s {
-		if c == ' ' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
+func normalizeScopes(scopes []string) []string {
+	seen := make(map[string]bool, len(scopes))
+	result := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		for _, s := range strings.Fields(scope) {
+			if !seen[s] {
+				seen[s] = true
+				result = append(result, s)
 			}
-		} else {
-			current += string(c)
 		}
-	}
-	if current != "" {
-		result = append(result, current)
 	}
 	return result
 }
 
 func joinScopes(scopes []string) string {
-	result := ""
-	for i, s := range scopes {
-		if i > 0 {
-			result += " "
-		}
-		result += s
+	return strings.Join(scopes, " ")
+}
+
+func (h *ConsentHandler) scopesExist(ctx context.Context, scopes []string) (bool, error) {
+	found, err := h.scopeStore.GetByNames(ctx, scopes)
+	if err != nil {
+		return false, err
 	}
-	return result
+	return len(found) == len(scopes), nil
 }

@@ -45,6 +45,7 @@ CREATE TABLE auth.clients (
     client_secret_hash  VARCHAR(255),
     name                VARCHAR(255) NOT NULL,
     description         TEXT,
+    icon_url            TEXT,
     client_type         VARCHAR(50)  NOT NULL DEFAULT 'confidential',
     redirect_uris       TEXT[]       NOT NULL,
     allowed_grant_types TEXT[]       NOT NULL DEFAULT '{authorization_code}',
@@ -108,26 +109,13 @@ CREATE INDEX idx_audit_member_id  ON auth.audit_logs (member_id);
 CREATE INDEX idx_audit_action     ON auth.audit_logs (action);
 CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
 
-CREATE TABLE auth.signing_keys (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kid         VARCHAR(100) NOT NULL UNIQUE,
-    algorithm   VARCHAR(10)  NOT NULL DEFAULT 'ES256',
-    public_key  TEXT NOT NULL,
-    private_key TEXT NOT NULL,
-    is_active   BOOLEAN     NOT NULL DEFAULT true,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ,
-
-    CONSTRAINT chk_algorithm CHECK (algorithm IN ('ES256', 'RS256'))
-);
-
 ------------------------------------------------------------------------
 -- resource schema
 ------------------------------------------------------------------------
 
 CREATE TABLE resource.member_identities (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    member_id    UUID         NOT NULL UNIQUE,
+    member_id    UUID         NOT NULL UNIQUE REFERENCES auth.members(id) ON DELETE CASCADE,
     display_name VARCHAR(100) NOT NULL,
     avatar_url   TEXT,
     theme_color  VARCHAR(7)   NOT NULL DEFAULT '#000000',

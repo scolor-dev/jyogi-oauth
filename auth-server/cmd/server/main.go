@@ -38,10 +38,15 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	jwtService, err := oauth.NewJWTService(
-		cfg.JWTPrivateKeyPath, cfg.JWTPublicKeyPath,
-		cfg.JWTKID, cfg.JWTIssuer, cfg.AccessTokenTTL,
-	)
+	var jwtService *oauth.JWTService
+	if cfg.JWTKeysDir != "" {
+		jwtService, err = oauth.NewJWTServiceFromDir(cfg.JWTKeysDir, cfg.JWTActiveKID, cfg.JWTIssuer, cfg.AccessTokenTTL)
+	} else {
+		jwtService, err = oauth.NewJWTService(
+			cfg.JWTPrivateKeyPath, cfg.JWTPublicKeyPath,
+			cfg.JWTKID, cfg.JWTIssuer, cfg.AccessTokenTTL,
+		)
+	}
 	if err != nil {
 		log.Fatalf("init jwt service: %v", err)
 	}
@@ -81,14 +86,16 @@ func main() {
 		sessionStore, consentStore, authCodeStore, clientStore, scopeStore, auditStore, cfg,
 	)
 	tokenHandler := handler.NewTokenHandler(
-		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, pool, cfg,
+		authCodeStore, refreshStore, clientStore, memberStore, jwtService, auditStore, rateLimiter, pool, cfg,
 	)
 	revokeHandler := handler.NewRevokeHandler(refreshStore, clientStore, auditStore)
 	introspectHandler := handler.NewIntrospectHandler(jwtService)
 	userinfoHandler := handler.NewUserInfoHandler(memberStore, jwtService, pool)
 	discoveryHandler := handler.NewDiscoveryHandler(cfg.JWTIssuer)
 	adminClientHandler := handler.NewAdminClientHandler(clientStore, auditStore)
-	meHandler := handler.NewMeHandler(memberStore, sessionStore, pool, cfg.SessionCookieName)
+	adminScopeHandler := handler.NewAdminScopeHandler(scopeStore, auditStore)
+	adminAuditHandler := handler.NewAdminAuditHandler(auditStore)
+	meHandler := handler.NewMeHandler(memberStore, sessionStore, pool, cfg.SessionCookieName, cfg.SessionCookieSecure, cfg.SessionCookieDomain)
 	meIdentityHandler := handler.NewMeIdentityHandler(pool)
 	meConsentHandler := handler.NewMeConsentHandler(consentStore, auditStore, pool)
 	mePasswordHandler := handler.NewMePasswordHandler(memberStore, sessionStore, auditStore, pwConfig)
@@ -149,6 +156,7 @@ func main() {
 	mux.HandleFunc("POST /oauth/me/clients", meClientHandler.Create)
 	mux.HandleFunc("PUT /oauth/me/clients/{id}", meClientHandler.Update)
 	mux.HandleFunc("DELETE /oauth/me/clients/{id}", meClientHandler.Delete)
+	mux.HandleFunc("POST /oauth/me/clients/{id}/rotate-secret", meClientHandler.RotateSecret)
 
 	adminMembers := http.NewServeMux()
 	adminMembers.HandleFunc("GET /oauth/admin/members", adminMemberHandler.List)
@@ -166,8 +174,21 @@ func main() {
 	adminClients.HandleFunc("GET /oauth/admin/clients/{id}", adminClientHandler.Get)
 	adminClients.HandleFunc("PUT /oauth/admin/clients/{id}", adminClientHandler.Update)
 	adminClients.HandleFunc("DELETE /oauth/admin/clients/{id}", adminClientHandler.Delete)
+	adminClients.HandleFunc("POST /oauth/admin/clients/{id}/rotate-secret", adminClientHandler.RotateSecret)
 	mux.Handle("/oauth/admin/clients", adminMiddleware.RequireAdmin(adminClients))
 	mux.Handle("/oauth/admin/clients/", adminMiddleware.RequireAdmin(adminClients))
+
+	adminScopes := http.NewServeMux()
+	adminScopes.HandleFunc("GET /oauth/admin/scopes", adminScopeHandler.List)
+	adminScopes.HandleFunc("POST /oauth/admin/scopes", adminScopeHandler.Create)
+	adminScopes.HandleFunc("PUT /oauth/admin/scopes/{id}", adminScopeHandler.Update)
+	adminScopes.HandleFunc("DELETE /oauth/admin/scopes/{id}", adminScopeHandler.Delete)
+	mux.Handle("/oauth/admin/scopes", adminMiddleware.RequireAdmin(adminScopes))
+	mux.Handle("/oauth/admin/scopes/", adminMiddleware.RequireAdmin(adminScopes))
+
+	adminAuditLogs := http.NewServeMux()
+	adminAuditLogs.HandleFunc("GET /oauth/admin/audit-logs", adminAuditHandler.List)
+	mux.Handle("/oauth/admin/audit-logs", adminMiddleware.RequireModerator(adminAuditLogs))
 
 	wrappedMux := sessionMiddleware.Wrap(mux)
 

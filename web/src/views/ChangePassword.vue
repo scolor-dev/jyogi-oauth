@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { getErrorMessage } from '../types'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -15,9 +16,6 @@ const loading = ref(false)
 
 onMounted(async () => {
   if (!auth.loaded) await auth.fetchMe()
-  if (!auth.isLoggedIn()) {
-    router.push('/login')
-  }
 })
 
 async function handleSubmit() {
@@ -31,8 +29,8 @@ async function handleSubmit() {
     await api.changePassword(currentPassword.value, newPassword.value)
     await auth.fetchMe()
     router.push('/dashboard')
-  } catch (e: any) {
-    error.value = e.message || 'Failed to change password'
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Failed to change password')
   } finally {
     loading.value = false
   }

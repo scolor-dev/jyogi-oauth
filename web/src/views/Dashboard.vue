@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { getErrorMessage, type ConsentInfo, type GrantType, type OAuthClient, type SessionInfo } from '../types'
 
-const router = useRouter()
 const auth = useAuthStore()
 
 const tab = ref<'profile' | 'apps' | 'clients' | 'sessions'>('profile')
-const consents = ref<any[]>([])
-const myClients = ref<any[]>([])
-const sessions = ref<any[]>([])
+const consents = ref<ConsentInfo[]>([])
+const myClients = ref<OAuthClient[]>([])
+const sessions = ref<SessionInfo[]>([])
 const sessionsLoaded = ref(false)
 const saving = ref(false)
 const saveMsg = ref('')
@@ -22,21 +21,31 @@ const tagline = ref('')
 
 // Client creation
 const showCreateClient = ref(false)
-const newClient = ref({ name: '', client_type: 'public', redirect_uris: '', description: '', grant_types: ['authorization_code'] as string[] })
+const newClient = ref<{ name: string; client_type: OAuthClient['client_type']; redirect_uris: string; description: string; icon_url: string; grant_types: GrantType[] }>({
+  name: '',
+  client_type: 'public',
+  redirect_uris: '',
+  description: '',
+  icon_url: '',
+  grant_types: ['authorization_code'],
+})
 const createdSecret = ref('')
+const rotatedSecret = ref<{ clientId: string; secret: string } | null>(null)
 const clientError = ref('')
 
 // Client editing
 const editingClientId = ref<string | null>(null)
-const editClient = ref({ name: '', redirect_uris: '', grant_types: [] as string[] })
+const editClient = ref<{ name: string; description: string; icon_url: string; redirect_uris: string; grant_types: GrantType[] }>({
+  name: '',
+  description: '',
+  icon_url: '',
+  redirect_uris: '',
+  grant_types: [],
+})
 const editError = ref('')
 
 onMounted(async () => {
   if (!auth.loaded) await auth.fetchMe()
-  if (!auth.isLoggedIn()) {
-    router.push('/login')
-    return
-  }
   if (auth.identity) {
     displayName.value = auth.identity.display_name
     avatarUrl.value = auth.identity.avatar_url || ''
@@ -59,14 +68,18 @@ async function loadConsents() {
   try {
     const data = await api.getConsents()
     consents.value = data.consents || []
-  } catch {}
+  } catch (e: unknown) {
+    saveMsg.value = getErrorMessage(e, 'Failed to load connected apps')
+  }
 }
 
 async function loadClients() {
   try {
     const data = await api.getMyClients()
     myClients.value = data.clients || []
-  } catch {}
+  } catch (e: unknown) {
+    clientError.value = getErrorMessage(e, 'Failed to load clients')
+  }
 }
 
 async function saveProfile() {
@@ -82,8 +95,8 @@ async function saveProfile() {
     await auth.fetchMe()
     saveMsg.value = 'Saved'
     setTimeout(() => saveMsg.value = '', 2000)
-  } catch (e: any) {
-    saveMsg.value = e.message || 'Failed to save'
+  } catch (e: unknown) {
+    saveMsg.value = getErrorMessage(e, 'Failed to save')
   } finally {
     saving.value = false
   }
@@ -94,7 +107,9 @@ async function loadSessions() {
     const data = await api.getSessions()
     sessions.value = data.sessions || []
     sessionsLoaded.value = true
-  } catch {}
+  } catch (e: unknown) {
+    saveMsg.value = getErrorMessage(e, 'Failed to load sessions')
+  }
 }
 
 function parseUA(ua: string): string {
@@ -111,7 +126,9 @@ async function revokeSession(sessionId: string) {
   try {
     await api.revokeSession(sessionId)
     await loadSessions()
-  } catch {}
+  } catch (e: unknown) {
+    saveMsg.value = getErrorMessage(e, 'Failed to revoke session')
+  }
 }
 
 async function revokeApp(clientId: string) {
@@ -119,7 +136,9 @@ async function revokeApp(clientId: string) {
   try {
     await api.revokeConsent(clientId)
     await loadConsents()
-  } catch {}
+  } catch (e: unknown) {
+    saveMsg.value = getErrorMessage(e, 'Failed to revoke app')
+  }
 }
 
 async function createClient() {
@@ -137,22 +156,25 @@ async function createClient() {
       redirect_uris: uris,
       allowed_grant_types: newClient.value.grant_types,
       description: newClient.value.description || undefined,
+      icon_url: newClient.value.icon_url || undefined,
     })
     if (res.client_secret) {
       createdSecret.value = res.client_secret
     }
-    newClient.value = { name: '', client_type: 'public', redirect_uris: '', description: '', grant_types: ['authorization_code'] }
+    newClient.value = { name: '', client_type: 'public', redirect_uris: '', description: '', icon_url: '', grant_types: ['authorization_code'] }
     await loadClients()
     if (!res.client_secret) showCreateClient.value = false
-  } catch (e: any) {
-    clientError.value = e.message || 'Failed to create client'
+  } catch (e: unknown) {
+    clientError.value = getErrorMessage(e, 'Failed to create client')
   }
 }
 
-function startEditClient(client: any) {
+function startEditClient(client: OAuthClient) {
   editingClientId.value = client.id
   editClient.value = {
     name: client.name,
+    description: client.description || '',
+    icon_url: client.icon_url || '',
     redirect_uris: client.redirect_uris.join('\n'),
     grant_types: [...client.allowed_grant_types],
   }
@@ -178,13 +200,15 @@ async function saveEditClient(id: string) {
   try {
     await api.updateClient(id, {
       name: editClient.value.name,
+      description: editClient.value.description,
+      icon_url: editClient.value.icon_url,
       redirect_uris: uris,
       allowed_grant_types: editClient.value.grant_types,
     })
     editingClientId.value = null
     await loadClients()
-  } catch (e: any) {
-    editError.value = e.message || 'Failed to update client'
+  } catch (e: unknown) {
+    editError.value = getErrorMessage(e, 'Failed to update client')
   }
 }
 
@@ -193,7 +217,19 @@ async function deleteClient(id: string) {
   try {
     await api.deleteClient(id)
     await loadClients()
-  } catch {}
+  } catch (e: unknown) {
+    clientError.value = getErrorMessage(e, 'Failed to delete client')
+  }
+}
+
+async function rotateClientSecret(client: OAuthClient) {
+  if (!confirm(`${client.name} のclient secretを再発行しますか？既存のsecretは使えなくなります。`)) return
+  try {
+    const res = await api.rotateClientSecret(client.id)
+    rotatedSecret.value = { clientId: client.id, secret: res.client_secret }
+  } catch (e: unknown) {
+    clientError.value = getErrorMessage(e, 'Failed to rotate client secret')
+  }
 }
 
 const previewStyle = computed(() => ({
@@ -322,6 +358,10 @@ const previewStyle = computed(() => ({
           <label>Description (optional)</label>
           <input v-model="newClient.description" placeholder="What does this app do?">
         </div>
+        <div class="form-group">
+          <label>Icon URL (optional)</label>
+          <input v-model="newClient.icon_url" placeholder="https://example.com/icon.png">
+        </div>
         <p v-if="clientError" class="error-msg">{{ clientError }}</p>
         <button class="btn-primary" @click="createClient">Create Client</button>
 
@@ -341,6 +381,14 @@ const previewStyle = computed(() => ({
           <div class="form-group">
             <label>Application Name</label>
             <input v-model="editClient.name">
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <input v-model="editClient.description">
+          </div>
+          <div class="form-group">
+            <label>Icon URL</label>
+            <input v-model="editClient.icon_url" placeholder="https://example.com/icon.png">
           </div>
           <div class="form-group">
             <label>Redirect URIs (one per line)</label>
@@ -368,8 +416,13 @@ const previewStyle = computed(() => ({
         </div>
         <!-- View mode -->
         <div v-else class="client-item">
+          <div class="client-icon" aria-hidden="true">
+            <img v-if="client.icon_url" :src="client.icon_url" alt="">
+            <span v-else>{{ client.name.charAt(0).toUpperCase() }}</span>
+          </div>
           <div class="client-info">
             <div class="client-name">{{ client.name }}</div>
+            <div v-if="client.description" class="client-desc">{{ client.description }}</div>
             <div class="client-meta">
               <code class="client-id">{{ client.client_id }}</code>
               <span class="type-badge" :class="'type-' + client.client_type">{{ client.client_type }}</span>
@@ -382,9 +435,15 @@ const previewStyle = computed(() => ({
             </div>
           </div>
           <div class="client-actions">
+            <button v-if="client.client_type === 'confidential'" class="btn-secondary btn-sm" @click="rotateClientSecret(client)">Rotate Secret</button>
             <button class="btn-secondary btn-sm" @click="startEditClient(client)">Edit</button>
             <button class="btn-danger btn-sm" @click="deleteClient(client.id)">Delete</button>
           </div>
+        </div>
+        <div v-if="rotatedSecret?.clientId === client.id" class="secret-display compact-secret">
+          <p><strong>New Client Secret (shown only once):</strong></p>
+          <code class="secret-code">{{ rotatedSecret.secret }}</code>
+          <p class="secret-warn">Copy this now. The previous secret no longer works.</p>
         </div>
       </div>
     </div>
@@ -465,6 +524,7 @@ h2 { margin-bottom: 1rem; }
 }
 .app-item:last-child, .client-item:last-child { border-bottom: none; }
 .app-name, .client-name { font-weight: 600; margin-bottom: 0.2rem; }
+.client-info { flex: 1; min-width: 0; }
 .app-scopes { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.2rem; }
 .scope-badge {
   display: inline-block; padding: 0.1rem 0.5rem; border-radius: 3px;
@@ -500,6 +560,13 @@ select {
 .secret-warn { font-size: 0.8rem; color: #856404; font-weight: 500; }
 
 .client-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.client-icon {
+  width: 44px; height: 44px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #eef2f7; color: #345; font-weight: 700; overflow: hidden;
+}
+.client-icon img { width: 100%; height: 100%; object-fit: cover; }
+.client-desc { color: #666; font-size: 0.85rem; margin-bottom: 0.25rem; }
 .client-id { font-size: 0.8rem; }
 .type-badge {
   font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; font-weight: 600;
@@ -527,6 +594,7 @@ select {
   font-size: 0.7rem; background: #f3e5f5; color: #7b1fa2; font-family: monospace;
 }
 .client-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.compact-secret { margin: 0 0 0.8rem 3.4rem; }
 
 .edit-form {
   background: #f8f9fa; border-radius: 6px; padding: 1rem;

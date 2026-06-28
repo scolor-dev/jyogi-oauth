@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -23,11 +24,16 @@ func HasScope(scopeStr, target string) bool {
 }
 
 type JWTService struct {
-	privateKey     *ecdsa.PrivateKey
-	publicKey      *ecdsa.PublicKey
-	kid            string
+	activeKey      *SigningKey
+	keys           []SigningKey
 	issuer         string
 	accessTokenTTL time.Duration
+}
+
+type SigningKey struct {
+	KID        string
+	PrivateKey *ecdsa.PrivateKey
+	PublicKey  *ecdsa.PublicKey
 }
 
 type AccessTokenClaims struct {
@@ -91,13 +97,106 @@ func NewJWTService(privateKeyPath, publicKeyPath, kid, issuer string, accessToke
 		return nil, fmt.Errorf("public key is not ECDSA")
 	}
 
+	key := SigningKey{KID: kid, PrivateKey: privKey, PublicKey: pubKey}
 	return &JWTService{
-		privateKey:     privKey,
-		publicKey:      pubKey,
-		kid:            kid,
+		activeKey:      &key,
+		keys:           []SigningKey{key},
 		issuer:         issuer,
 		accessTokenTTL: accessTokenTTL,
 	}, nil
+}
+
+func NewJWTServiceFromDir(keysDir, activeKID, issuer string, accessTokenTTL time.Duration) (*JWTService, error) {
+	matches, err := filepath.Glob(filepath.Join(keysDir, "*.public.pem"))
+	if err != nil {
+		return nil, fmt.Errorf("scan public keys: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no public keys found in %s", keysDir)
+	}
+
+	var keys []SigningKey
+	activeIndex := -1
+	for _, publicPath := range matches {
+		kid := strings.TrimSuffix(filepath.Base(publicPath), ".public.pem")
+		privatePath := filepath.Join(keysDir, kid+".private.pem")
+
+		pubKey, err := loadPublicKey(publicPath)
+		if err != nil {
+			return nil, err
+		}
+
+		var privateKey *ecdsa.PrivateKey
+		if _, err := os.Stat(privatePath); err == nil {
+			privateKey, err = loadPrivateKey(privatePath)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		key := SigningKey{KID: kid, PrivateKey: privateKey, PublicKey: pubKey}
+		keys = append(keys, key)
+		if kid == activeKID {
+			activeIndex = len(keys) - 1
+		}
+	}
+
+	if activeIndex == -1 {
+		return nil, fmt.Errorf("active JWT key %q not found", activeKID)
+	}
+	active := &keys[activeIndex]
+	if active.PrivateKey == nil {
+		return nil, fmt.Errorf("active JWT key %q is missing private key", activeKID)
+	}
+
+	return &JWTService{
+		activeKey:      active,
+		keys:           keys,
+		issuer:         issuer,
+		accessTokenTTL: accessTokenTTL,
+	}, nil
+}
+
+func loadPrivateKey(path string) (*ecdsa.PrivateKey, error) {
+	privPEM, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read private key %s: %w", path, err)
+	}
+	block, _ := pem.Decode(privPEM)
+	if block == nil {
+		return nil, fmt.Errorf("decode private key PEM %s", path)
+	}
+	privKey, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key %s: %w", path, err)
+	}
+	if privKey.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("key %s must use P-256 curve for ES256", path)
+	}
+	return privKey, nil
+}
+
+func loadPublicKey(path string) (*ecdsa.PublicKey, error) {
+	pubPEM, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read public key %s: %w", path, err)
+	}
+	pubBlock, _ := pem.Decode(pubPEM)
+	if pubBlock == nil {
+		return nil, fmt.Errorf("decode public key PEM %s", path)
+	}
+	pubIface, err := x509.ParsePKIXPublicKey(pubBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse public key %s: %w", path, err)
+	}
+	pubKey, ok := pubIface.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key %s is not ECDSA", path)
+	}
+	if pubKey.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("public key %s must use P-256 curve for ES256", path)
+	}
+	return pubKey, nil
 }
 
 func (j *JWTService) SignAccessToken(claims AccessTokenClaims) (string, error) {
@@ -120,9 +219,9 @@ func (j *JWTService) SignAccessToken(claims AccessTokenClaims) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, mapClaims)
-	token.Header["kid"] = j.kid
+	token.Header["kid"] = j.activeKey.KID
 
-	return token.SignedString(j.privateKey)
+	return token.SignedString(j.activeKey.PrivateKey)
 }
 
 func (j *JWTService) SignClientCredentialsToken(clientID, scope string) (string, error) {
@@ -142,9 +241,9 @@ func (j *JWTService) SignClientCredentialsToken(clientID, scope string) (string,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, mapClaims)
-	token.Header["kid"] = j.kid
+	token.Header["kid"] = j.activeKey.KID
 
-	return token.SignedString(j.privateKey)
+	return token.SignedString(j.activeKey.PrivateKey)
 }
 
 type IDTokenClaims struct {
@@ -156,7 +255,7 @@ type IDTokenClaims struct {
 	AccessToken string
 	// profile claims
 	Name              string
-	PreferredUsername  string
+	PreferredUsername string
 	// identity claims
 	Picture string
 	Color   string
@@ -167,11 +266,11 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 	now := time.Now()
 
 	mapClaims := jwt.MapClaims{
-		"iss":       j.issuer,
-		"sub":       claims.MemberID,
-		"aud":       claims.ClientID,
-		"exp":       jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
-		"iat":       jwt.NewNumericDate(now),
+		"iss": j.issuer,
+		"sub": claims.MemberID,
+		"aud": claims.ClientID,
+		"exp": jwt.NewNumericDate(now.Add(j.accessTokenTTL)),
+		"iat": jwt.NewNumericDate(now),
 	}
 
 	if claims.AuthTime != 0 {
@@ -210,9 +309,9 @@ func (j *JWTService) SignIDToken(claims IDTokenClaims) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, mapClaims)
-	token.Header["kid"] = j.kid
+	token.Header["kid"] = j.activeKey.KID
 
-	return token.SignedString(j.privateKey)
+	return token.SignedString(j.activeKey.PrivateKey)
 }
 
 func computeAtHash(accessToken string) string {
@@ -225,7 +324,13 @@ func (j *JWTService) VerifyToken(tokenString string) (jwt.MapClaims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
-		return j.publicKey, nil
+		kid, _ := t.Header["kid"].(string)
+		for i := range j.keys {
+			if j.keys[i].KID == kid {
+				return j.keys[i].PublicKey, nil
+			}
+		}
+		return nil, fmt.Errorf("unknown kid: %s", kid)
 	})
 	if err != nil {
 		return nil, err
@@ -240,19 +345,19 @@ func (j *JWTService) VerifyToken(tokenString string) (jwt.MapClaims, error) {
 }
 
 func (j *JWTService) GetJWKS() JWKSResponse {
-	return JWKSResponse{
-		Keys: []JWK{
-			{
-				Kty: "EC",
-				Use: "sig",
-				Kid: j.kid,
-				Alg: "ES256",
-				Crv: "P-256",
-				X:   base64URLEncode(j.publicKey.X),
-				Y:   base64URLEncode(j.publicKey.Y),
-			},
-		},
+	keys := make([]JWK, 0, len(j.keys))
+	for _, key := range j.keys {
+		keys = append(keys, JWK{
+			Kty: "EC",
+			Use: "sig",
+			Kid: key.KID,
+			Alg: "ES256",
+			Crv: "P-256",
+			X:   base64URLEncode(key.PublicKey.X),
+			Y:   base64URLEncode(key.PublicKey.Y),
+		})
 	}
+	return JWKSResponse{Keys: keys}
 }
 
 func base64URLEncode(n *big.Int) string {

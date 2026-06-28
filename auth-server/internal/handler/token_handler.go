@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jyogi-oauth/auth-server/internal/config"
+	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/oauth"
 	"github.com/jyogi-oauth/auth-server/internal/store"
@@ -21,6 +24,7 @@ type TokenHandler struct {
 	memberStore   *store.MemberStore
 	jwtService    *oauth.JWTService
 	auditStore    *store.AuditStore
+	rateLimiter   *middleware.RateLimiter
 	pool          *pgxpool.Pool
 	cfg           *config.Config
 }
@@ -32,6 +36,7 @@ func NewTokenHandler(
 	memberStore *store.MemberStore,
 	jwtService *oauth.JWTService,
 	auditStore *store.AuditStore,
+	rateLimiter *middleware.RateLimiter,
 	pool *pgxpool.Pool,
 	cfg *config.Config,
 ) *TokenHandler {
@@ -42,6 +47,7 @@ func NewTokenHandler(
 		memberStore:   memberStore,
 		jwtService:    jwtService,
 		auditStore:    auditStore,
+		rateLimiter:   rateLimiter,
 		pool:          pool,
 		cfg:           cfg,
 	}
@@ -56,6 +62,10 @@ func (h *TokenHandler) Token(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 
+	if !h.checkRateLimits(w, r) {
+		return
+	}
+
 	grantType := r.FormValue("grant_type")
 	switch grantType {
 	case "authorization_code":
@@ -67,6 +77,42 @@ func (h *TokenHandler) Token(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "Unsupported grant_type")
 	}
+}
+
+func (h *TokenHandler) checkRateLimits(w http.ResponseWriter, r *http.Request) bool {
+	if h.rateLimiter == nil {
+		return true
+	}
+
+	if h.cfg.RateLimitIP > 0 {
+		allowed, _, err := h.rateLimiter.Check(r.Context(), "ratelimit:token:ip:"+remoteIP(r.RemoteAddr), h.cfg.RateLimitIP, time.Minute)
+		if err == nil && !allowed {
+			writeOAuthError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "Too many token requests from this IP")
+			return false
+		}
+	}
+
+	clientID := r.FormValue("client_id")
+	if basicID, _, ok := r.BasicAuth(); ok {
+		clientID = basicID
+	}
+	if clientID != "" && h.cfg.RateLimitToken > 0 {
+		allowed, _, err := h.rateLimiter.Check(r.Context(), "ratelimit:token:client:"+clientID, h.cfg.RateLimitToken, time.Minute)
+		if err == nil && !allowed {
+			writeOAuthError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "Too many token requests for this client")
+			return false
+		}
+	}
+
+	return true
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
 
 func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Request) {
@@ -166,12 +212,12 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 
 	if oauth.HasScope(codeData.Scope, "openid") {
 		idTokenClaims := oauth.IDTokenClaims{
-			MemberID:         codeData.MemberID,
-			ClientID:         clientID,
-			Nonce:            codeData.Nonce,
-			AuthTime:         codeData.AuthTime,
-			Scope:            codeData.Scope,
-			AccessToken:      accessToken,
+			MemberID:          codeData.MemberID,
+			ClientID:          clientID,
+			Nonce:             codeData.Nonce,
+			AuthTime:          codeData.AuthTime,
+			Scope:             codeData.Scope,
+			AccessToken:       accessToken,
 			PreferredUsername: member.Username,
 		}
 		if oauth.HasScope(codeData.Scope, "profile") {
@@ -301,11 +347,11 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 
 	if oauth.HasScope(scope, "openid") {
 		idTokenClaims := oauth.IDTokenClaims{
-			MemberID:         tokenData.MemberID,
-			ClientID:         clientID,
-			AuthTime:         tokenData.AuthTime,
-			Scope:            scope,
-			AccessToken:      accessToken,
+			MemberID:          tokenData.MemberID,
+			ClientID:          clientID,
+			AuthTime:          tokenData.AuthTime,
+			Scope:             scope,
+			AccessToken:       accessToken,
 			PreferredUsername: member.Username,
 		}
 		if oauth.HasScope(scope, "profile") {

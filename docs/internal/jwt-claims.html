@@ -278,19 +278,21 @@
 </code></pre>
 <hr />
 <h2>鍵ローテーション</h2>
+<p>認可サーバーは従来の単一鍵指定（<code>AUTH_JWT_PRIVATE_KEY_PATH</code> / <code>AUTH_JWT_PUBLIC_KEY_PATH</code>）に加えて、複数鍵ディレクトリ方式に対応する。</p>
+<p><code>AUTH_JWT_KEYS_DIR</code> を設定した場合、<code>*.public.pem</code> をすべてJWKSで公開し、<code>AUTH_JWT_ACTIVE_KID</code> に一致する <code>{kid}.private.pem</code> で新規トークンを署名する。</p>
 <h3>手順</h3>
 <pre><code>1. 新しい鍵ペアを生成（kid: key-2）
-2. JWKS に新旧両方の鍵を公開
-3. 認可サーバーの署名鍵を key-2 に切り替え
+2. keys ディレクトリに key-2.public.pem / key-2.private.pem を配置
+3. AUTH_JWT_ACTIVE_KID を key-2 に切り替えて auth-server を再起動
 4. 旧トークンがすべて失効するまで待つ（最大15分）
-5. JWKS から旧鍵（key-1）を削除
+5. key-1.public.pem を削除して JWKS から旧鍵を外す
 </code></pre>
 <h3>鍵生成コマンド（ES256）</h3>
 <pre><code class="language-bash"># 秘密鍵の生成
-openssl ecparam -genkey -name prime256v1 -noout -out private.pem
+openssl ecparam -genkey -name prime256v1 -noout -out key-2.private.pem
 
 # 公開鍵の抽出
-openssl ec -in private.pem -pubout -out public.pem
+openssl ec -in key-2.private.pem -pubout -out key-2.public.pem
 </code></pre>
 <hr />
 <h2>トークンサイズの目安</h2>

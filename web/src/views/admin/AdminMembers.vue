@@ -2,9 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { api } from '../../api'
 import { useAuthStore } from '../../stores/auth'
+import { getErrorMessage, type Member, type Role } from '../../types'
 
 const auth = useAuthStore()
-const members = ref<any[]>([])
+const members = ref<Member[]>([])
 const total = ref(0)
 const page = ref(1)
 const loading = ref(true)
@@ -15,7 +16,7 @@ const newMember = ref({ username: '', password: '', email: '', must_change_passw
 const createError = ref('')
 
 const editingId = ref<string | null>(null)
-const editRole = ref('')
+const editRole = ref<Role>('member')
 const tempPassword = ref('')
 const tempPasswordFor = ref('')
 
@@ -27,8 +28,8 @@ async function loadMembers() {
     const data = await api.admin.listMembers(page.value)
     members.value = data.members || []
     total.value = data.total
-  } catch (e: any) {
-    error.value = e.message || 'Failed to load'
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Failed to load')
   } finally {
     loading.value = false
   }
@@ -41,7 +42,7 @@ async function createMember() {
     return
   }
   try {
-    const payload: any = {
+    const payload: { username: string; email: string; must_change_password: boolean; password?: string } = {
       username: newMember.value.username,
       email: newMember.value.email,
       must_change_password: newMember.value.must_change_password,
@@ -57,12 +58,12 @@ async function createMember() {
     newMember.value = { username: '', password: '', email: '', must_change_password: true }
     showCreate.value = false
     await loadMembers()
-  } catch (e: any) {
-    createError.value = e.message || 'Failed to create'
+  } catch (e: unknown) {
+    createError.value = getErrorMessage(e, 'Failed to create')
   }
 }
 
-function startEditRole(member: any) {
+function startEditRole(member: Member) {
   editingId.value = member.id
   editRole.value = member.role
 }
@@ -72,38 +73,44 @@ async function saveRole(id: string) {
     await api.admin.updateMember(id, { role: editRole.value })
     editingId.value = null
     await loadMembers()
-  } catch {}
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Failed to save role')
+  }
 }
 
-async function resetPassword(member: any) {
+async function resetPassword(member: Member) {
   if (!confirm(`${member.username} のパスワードをリセットしますか？`)) return
   tempPassword.value = ''
   try {
     const res = await api.admin.resetPassword(member.id)
     tempPassword.value = res.temporary_password
     tempPasswordFor.value = member.username
-  } catch {}
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Failed to reset password')
+  }
 }
 
-async function toggleActive(member: any) {
+async function toggleActive(member: Member) {
   const action = member.is_active ? 'このメンバーを無効化しますか？' : 'このメンバーを有効化しますか？'
   if (!confirm(action)) return
   try {
     await api.admin.updateMember(member.id, { is_active: !member.is_active })
     await loadMembers()
-  } catch {}
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Failed to update member')
+  }
 }
 
 const roleLevels: Record<string, number> = { admin: 3, moderator: 2, member: 1 }
 
-function canManage(target: any): boolean {
+function canManage(target: Member): boolean {
   const me = auth.member
   if (!me || me.id === target.id) return false
   if (target.username === 'root') return false
   return (roleLevels[me.role] || 0) > (roleLevels[target.role] || 0)
 }
 
-function canEditRole(target: any): boolean {
+function canEditRole(target: Member): boolean {
   const me = auth.member
   if (!me || me.role !== 'admin') return false
   return canManage(target)

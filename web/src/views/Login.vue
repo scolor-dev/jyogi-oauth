@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { getErrorMessage } from '../types'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -29,8 +30,8 @@ async function handleLogin() {
 
     await auth.fetchMe()
     router.push('/dashboard')
-  } catch (e: any) {
-    error.value = e.message || 'Login failed'
+  } catch (e: unknown) {
+    error.value = getErrorMessage(e, 'Login failed')
   } finally {
     loading.value = false
   }

@@ -2034,7 +2034,7 @@ dependencies = [
 
 [[package]]
 name = "resource-server"
-version = "0.1.0"
+version = "0.2.2"
 dependencies = [
  "actix-web",
  "base64",

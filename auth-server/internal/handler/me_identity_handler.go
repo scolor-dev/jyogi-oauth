@@ -73,7 +73,7 @@ func (h *MeIdentityHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DisplayName == "" || len(req.DisplayName) > 100 {
+	if req.DisplayName == "" || len([]rune(req.DisplayName)) > 100 {
 		writeError(w, http.StatusBadRequest, "validation_error", "display_name must be 1-100 characters")
 		return
 	}

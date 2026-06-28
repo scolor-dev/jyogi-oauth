@@ -32,11 +32,11 @@ type SessionData struct {
 	MemberID           string           `json:"member_id"`
 	Username           string           `json:"username"`
 	MustChangePassword bool             `json:"must_change_password,omitempty"`
-	IPAddress      string           `json:"ip_address"`
-	UserAgent      string           `json:"user_agent"`
-	CreatedAt      int64            `json:"created_at"`
-	LastAccessedAt int64            `json:"last_accessed_at"`
-	OAuthParams    *OAuthFlowParams `json:"oauth_params,omitempty"`
+	IPAddress          string           `json:"ip_address"`
+	UserAgent          string           `json:"user_agent"`
+	CreatedAt          int64            `json:"created_at"`
+	LastAccessedAt     int64            `json:"last_accessed_at"`
+	OAuthParams        *OAuthFlowParams `json:"oauth_params,omitempty"`
 }
 
 type SessionStore struct {

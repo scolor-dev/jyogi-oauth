@@ -2,15 +2,15 @@
 config/.env.prod
 .env
 
-# Production deploy
-docker-compose.prod.yml
-nginx/prod.conf
-
 # Keys
 keys/
 
 # Go
 auth-server/auth-server
+auth-server/main
+auth-server/server
+auth-server/seed
+.cache/
 
 # Rust
 resource-server/target/
