@@ -1,19 +1,12 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 
 	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
-
-func hashSID(sessionID string) string {
-	h := sha256.Sum256([]byte(sessionID))
-	return hex.EncodeToString(h[:8])
-}
 
 type MeSessionHandler struct {
 	sessionStore *store.SessionStore
@@ -31,7 +24,7 @@ func (h *MeSessionHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentHashedID := hashSID(middleware.GetSessionID(r.Context()))
+	currentHashedID := store.HashSessionID(middleware.GetSessionID(r.Context()))
 
 	sessions, err := h.sessionStore.ListByMember(r.Context(), memberID.String())
 	if err != nil {
@@ -63,7 +56,7 @@ func (h *MeSessionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentHashedID := hashSID(middleware.GetSessionID(r.Context()))
+	currentHashedID := store.HashSessionID(middleware.GetSessionID(r.Context()))
 	if sessionID == currentHashedID {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Cannot revoke current session")
 		return

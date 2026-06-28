@@ -107,7 +107,11 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 	params := session.OAuthParams
 
 	if !req.Approved {
-		u, _ := url.Parse(params.RedirectURI)
+		u, err := url.Parse(params.RedirectURI)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
+			return
+		}
 		q := u.Query()
 		q.Set("error", "access_denied")
 		q.Set("error_description", "User denied the request")
@@ -174,7 +178,11 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 	session.OAuthParams = nil
 	h.sessionStore.Update(r.Context(), sessionID, session)
 
-	u, _ := url.Parse(params.RedirectURI)
+	u, err := url.Parse(params.RedirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
+		return
+	}
 	q := u.Query()
 	q.Set("code", code)
 	q.Set("state", params.State)

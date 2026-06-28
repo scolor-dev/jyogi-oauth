@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func hashSessionID(sessionID string) string {
+func HashSessionID(sessionID string) string {
 	h := sha256.Sum256([]byte(sessionID))
 	return hex.EncodeToString(h[:8])
 }
@@ -155,7 +155,7 @@ func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map
 			continue
 		}
 		sessions = append(sessions, map[string]any{
-			"session_id":       hashSessionID(sessionIDs[i]),
+			"session_id":       HashSessionID(sessionIDs[i]),
 			"ip_address":       data.IPAddress,
 			"user_agent":       data.UserAgent,
 			"created_at":       data.CreatedAt,
@@ -182,7 +182,7 @@ func (s *SessionStore) DeleteByHashedID(ctx context.Context, hashedID, memberID 
 	}
 
 	for _, sid := range sessionIDs {
-		if hashSessionID(sid) == hashedID {
+		if HashSessionID(sid) == hashedID {
 			if err := s.client.Del(ctx, "auth:session:"+sid).Err(); err != nil {
 				return fmt.Errorf("delete session: %w", err)
 			}
