@@ -11,7 +11,7 @@ const loading = ref(true)
 const error = ref('')
 
 const showCreate = ref(false)
-const newMember = ref({ username: '', password: '', email: '' })
+const newMember = ref({ username: '', password: '', email: '', must_change_password: true })
 const createError = ref('')
 
 const editingId = ref<string | null>(null)
@@ -36,13 +36,25 @@ async function loadMembers() {
 
 async function createMember() {
   createError.value = ''
-  if (!newMember.value.username || !newMember.value.password || !newMember.value.email) {
-    createError.value = 'All fields are required'
+  if (!newMember.value.username || !newMember.value.email) {
+    createError.value = 'Username and email are required'
     return
   }
   try {
-    await api.admin.createMember(newMember.value)
-    newMember.value = { username: '', password: '', email: '' }
+    const payload: any = {
+      username: newMember.value.username,
+      email: newMember.value.email,
+      must_change_password: newMember.value.must_change_password,
+    }
+    if (newMember.value.password) {
+      payload.password = newMember.value.password
+    }
+    const res = await api.admin.createMember(payload)
+    if (res.temporary_password) {
+      tempPassword.value = res.temporary_password
+      tempPasswordFor.value = newMember.value.username
+    }
+    newMember.value = { username: '', password: '', email: '', must_change_password: true }
     showCreate.value = false
     await loadMembers()
   } catch (e: any) {
@@ -119,10 +131,14 @@ function canEditRole(target: any): boolean {
           <input v-model="newMember.email" type="email">
         </div>
         <div class="form-group">
-          <label>Password</label>
-          <input v-model="newMember.password" type="password">
+          <label>Password <span class="hint">(空欄で自動生成)</span></label>
+          <input v-model="newMember.password" type="password" placeholder="自動生成">
         </div>
       </div>
+      <label class="checkbox-label">
+        <input type="checkbox" v-model="newMember.must_change_password">
+        初回ログイン時にパスワード変更を強制する
+      </label>
       <p v-if="createError" class="error-msg">{{ createError }}</p>
       <button class="btn-primary" @click="createMember">Create</button>
     </div>
@@ -227,4 +243,7 @@ h1 { margin: 0; }
   display: inline-block; padding: 0.4rem 0.8rem; background: #fff; border: 1px solid #ddd;
   border-radius: 4px; font-size: 1rem; font-weight: 600; letter-spacing: 0.05em;
 }
+.checkbox-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; margin-bottom: 0.8rem; }
+.checkbox-label input[type="checkbox"] { cursor: pointer; }
+.hint { font-weight: 400; color: #aaa; font-size: 0.8rem; }
 </style>

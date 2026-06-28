@@ -62,7 +62,7 @@ export const api = {
     listMembers: (page = 1, perPage = 20) =>
       request<{ members: any[]; total: number; page: number; per_page: number }>('GET', `/oauth/admin/members?page=${page}&per_page=${perPage}`),
 
-    createMember: (data: { username: string; password: string; email: string }) =>
+    createMember: (data: { username: string; email: string; password?: string; must_change_password?: boolean }) =>
       request<any>('POST', '/oauth/admin/members', data),
 
     getMember: (id: string) =>

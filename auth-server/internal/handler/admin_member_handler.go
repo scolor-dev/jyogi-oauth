@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -67,9 +68,10 @@ func (h *AdminMemberHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createMemberRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Email    string `json:"email"`
+	Username           string `json:"username"`
+	Password           string `json:"password,omitempty"`
+	Email              string `json:"email"`
+	MustChangePassword *bool  `json:"must_change_password,omitempty"`
 }
 
 func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -79,17 +81,37 @@ func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username == "" || req.Password == "" || req.Email == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "username, password, and email are required")
+	if req.Username == "" || req.Email == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "username and email are required")
 		return
 	}
 
-	if err := oauth.ValidatePassword(req.Password, req.Username); err != nil {
+	mustChange := true
+	if req.MustChangePassword != nil {
+		mustChange = *req.MustChangePassword
+	}
+
+	var password string
+	var tempPassword string
+
+	if req.Password != "" {
+		password = req.Password
+	} else {
+		generated, err := oauth.GenerateRandomString(9)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to generate password")
+			return
+		}
+		password = generated
+		tempPassword = generated
+	}
+
+	if err := oauth.ValidatePassword(password, req.Username); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_password", err.Error())
 		return
 	}
 
-	hash, err := oauth.HashPassword(req.Password, h.pwConfig)
+	hash, err := oauth.HashPassword(password, h.pwConfig)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to hash password")
 		return
@@ -101,11 +123,24 @@ func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if mustChange {
+		h.memberStore.SetMustChangePassword(r.Context(), member.ID, true)
+		member.MustChangePassword = true
+	}
+
 	h.auditStore.Log(r.Context(), model.ActionMemberCreated, &member.ID, nil, r.RemoteAddr, r.UserAgent(), map[string]string{
-		"username": member.Username,
+		"username":             member.Username,
+		"must_change_password": fmt.Sprintf("%v", mustChange),
 	})
 
-	writeJSON(w, http.StatusCreated, member)
+	if tempPassword != "" {
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"member":             member,
+			"temporary_password": tempPassword,
+		})
+	} else {
+		writeJSON(w, http.StatusCreated, member)
+	}
 }
 
 func (h *AdminMemberHandler) Get(w http.ResponseWriter, r *http.Request) {
