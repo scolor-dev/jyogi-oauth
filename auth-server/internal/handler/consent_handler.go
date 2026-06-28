@@ -174,9 +174,13 @@ func (h *ConsentHandler) Process(w http.ResponseWriter, r *http.Request) {
 	session.OAuthParams = nil
 	h.sessionStore.Update(r.Context(), sessionID, session)
 
-	redirectURI := params.RedirectURI + "?code=" + code + "&state=" + params.State
+	u, _ := url.Parse(params.RedirectURI)
+	q := u.Query()
+	q.Set("code", code)
+	q.Set("state", params.State)
+	u.RawQuery = q.Encode()
 	writeJSON(w, http.StatusOK, map[string]string{
-		"redirect_to": redirectURI,
+		"redirect_to": u.String(),
 	})
 }
 
