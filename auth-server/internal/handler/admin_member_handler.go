@@ -117,18 +117,10 @@ func (h *AdminMemberHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, err := h.memberStore.Create(r.Context(), req.Username, hash, req.Email)
+	member, err := h.memberStore.Create(r.Context(), req.Username, hash, req.Email, mustChange)
 	if err != nil {
 		writeError(w, http.StatusConflict, "conflict", "Username or email already exists")
 		return
-	}
-
-	if mustChange {
-		if err := h.memberStore.SetMustChangePassword(r.Context(), member.ID, true); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set password change flag")
-			return
-		}
-		member.MustChangePassword = true
 	}
 
 	h.auditStore.Log(r.Context(), model.ActionMemberCreated, &member.ID, nil, r.RemoteAddr, r.UserAgent(), map[string]string{
@@ -282,13 +274,8 @@ func (h *AdminMemberHandler) ResetPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.memberStore.UpdatePassword(r.Context(), id, hash); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update password")
-		return
-	}
-
-	if err := h.memberStore.SetMustChangePassword(r.Context(), id, true); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set password reset flag")
+	if err := h.memberStore.ResetPassword(r.Context(), id, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset password")
 		return
 	}
 

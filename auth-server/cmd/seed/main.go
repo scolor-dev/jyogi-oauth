@@ -45,7 +45,7 @@ func main() {
 	}
 
 	memberStore := store.NewMemberStore(pool)
-	member, err := memberStore.Create(ctx, *username, hash, *email)
+	member, err := memberStore.Create(ctx, *username, hash, *email, false)
 	if err != nil {
 		log.Fatalf("create member: %v", err)
 	}
