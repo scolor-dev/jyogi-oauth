@@ -128,21 +128,49 @@ func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map
 		return nil, fmt.Errorf("list member sessions: %w", err)
 	}
 
+	if len(sessionIDs) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	keys := make([]string, len(sessionIDs))
+	for i, sid := range sessionIDs {
+		keys[i] = "auth:session:" + sid
+	}
+
+	vals, err := s.client.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("mget sessions: %w", err)
+	}
+
 	var sessions []map[string]any
-	for _, sid := range sessionIDs {
-		data, err := s.Get(ctx, sid)
-		if err != nil || data == nil {
-			s.client.SRem(ctx, memberSetKey, sid)
+	var stale []string
+	for i, v := range vals {
+		if v == nil {
+			stale = append(stale, sessionIDs[i])
+			continue
+		}
+		var data SessionData
+		if err := json.Unmarshal([]byte(v.(string)), &data); err != nil {
+			stale = append(stale, sessionIDs[i])
 			continue
 		}
 		sessions = append(sessions, map[string]any{
-			"session_id":       hashSessionID(sid),
+			"session_id":       hashSessionID(sessionIDs[i]),
 			"ip_address":       data.IPAddress,
 			"user_agent":       data.UserAgent,
 			"created_at":       data.CreatedAt,
 			"last_accessed_at": data.LastAccessedAt,
 		})
 	}
+
+	if len(stale) > 0 {
+		members := make([]any, len(stale))
+		for i, sid := range stale {
+			members[i] = sid
+		}
+		s.client.SRem(ctx, memberSetKey, members...)
+	}
+
 	return sessions, nil
 }
 
