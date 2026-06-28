@@ -549,7 +549,7 @@ CREATE INDEX idx_audit_created_at ON auth.audit_logs (created_at);
 表示名・アイコン・テーマカラー・タグラインの最小構成。</p>
 <pre><code class="language-sql">CREATE TABLE resource.member_identities (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    member_id    UUID NOT NULL UNIQUE,
+    member_id    UUID NOT NULL UNIQUE REFERENCES auth.members(id) ON DELETE CASCADE,
     display_name VARCHAR(100) NOT NULL,
     avatar_url   TEXT,
     theme_color  VARCHAR(7) NOT NULL DEFAULT '#000000',
@@ -579,8 +579,8 @@ CREATE UNIQUE INDEX idx_member_identities_member_id ON resource.member_identitie
 <tr>
 <td>member_id</td>
 <td>UUID</td>
-<td>UNIQUE, NOT NULL</td>
-<td>auth.members.id を参照（FK 制約なし）</td>
+<td>UNIQUE, NOT NULL, FK → auth.members(id) ON DELETE CASCADE</td>
+<td>auth.members.id を参照</td>
 </tr>
 <tr>
 <td>display_name</td>

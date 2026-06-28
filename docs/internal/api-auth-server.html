@@ -508,6 +508,19 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;error_description&quot;: &quot;Username or password is incorrect&quot;
 }
 </code></pre>
+<h3>GET /oauth/consent</h3>
+<p>同意画面に表示するクライアント情報と要求スコープを取得する。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  &quot;client_name&quot;: &quot;My Application&quot;,
+  &quot;client_icon_url&quot;: &quot;https://example.com/icon.png&quot;,
+  &quot;client_description&quot;: &quot;Optional application description&quot;,
+  &quot;requested_scopes&quot;: [
+    { &quot;name&quot;: &quot;openid&quot;, &quot;description&quot;: &quot;OpenID Connect 認証&quot; },
+    { &quot;name&quot;: &quot;identity&quot;, &quot;description&quot;: &quot;メンバーの基本識別情報の読み取り&quot; }
+  ]
+}
+</code></pre>
 <h3>POST /oauth/consent</h3>
 <p>同意フォームからのリクエストを処理する。</p>
 <p><strong>リクエストボディ（JSON）:</strong></p>
@@ -573,10 +586,13 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
       &quot;id&quot;: &quot;550e8400-...&quot;,
       &quot;client_id&quot;: &quot;my-app&quot;,
       &quot;name&quot;: &quot;My Application&quot;,
+      &quot;description&quot;: &quot;Optional application description&quot;,
+      &quot;icon_url&quot;: &quot;https://example.com/icon.png&quot;,
       &quot;client_type&quot;: &quot;confidential&quot;,
       &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
       &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
       &quot;is_active&quot;: true,
+      &quot;created_by&quot;: &quot;member-uuid&quot;,
       &quot;created_at&quot;: &quot;2026-01-15T09:00:00Z&quot;
     }
   ],
@@ -590,6 +606,8 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;My Application&quot;,
+  &quot;description&quot;: &quot;Optional application description&quot;,
+  &quot;icon_url&quot;: &quot;https://example.com/icon.png&quot;,
   &quot;client_type&quot;: &quot;confidential&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
   &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;]
@@ -599,15 +617,20 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <pre><code class="language-json">HTTP/1.1 201 Created
 
 {
-  &quot;id&quot;: &quot;550e8400-...&quot;,
-  &quot;client_id&quot;: &quot;generated-client-id&quot;,
-  &quot;client_secret&quot;: &quot;generated-secret-shown-only-once&quot;,
-  &quot;name&quot;: &quot;My Application&quot;,
-  &quot;client_type&quot;: &quot;confidential&quot;,
-  &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
-  &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
-  &quot;is_active&quot;: true,
-  &quot;created_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
+  &quot;client&quot;: {
+    &quot;id&quot;: &quot;550e8400-...&quot;,
+    &quot;client_id&quot;: &quot;generated-client-id&quot;,
+    &quot;name&quot;: &quot;My Application&quot;,
+    &quot;description&quot;: &quot;Optional application description&quot;,
+    &quot;icon_url&quot;: &quot;https://example.com/icon.png&quot;,
+    &quot;client_type&quot;: &quot;confidential&quot;,
+    &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;],
+    &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;],
+    &quot;is_active&quot;: true,
+    &quot;created_at&quot;: &quot;2026-06-24T09:00:00Z&quot;,
+    &quot;updated_at&quot;: &quot;2026-06-24T09:00:00Z&quot;
+  },
+  &quot;client_secret&quot;: &quot;generated-secret-shown-only-once&quot;
 }
 </code></pre>
 <p>※ <code>client_secret</code> はこのレスポンスでのみ平文表示。以降はハッシュ保存。</p>
@@ -618,6 +641,8 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
 <p><strong>リクエストボディ:</strong></p>
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;Updated App Name&quot;,
+  &quot;description&quot;: &quot;Updated application description&quot;,
+  &quot;icon_url&quot;: &quot;https://example.com/icon.png&quot;,
   &quot;redirect_uris&quot;: [&quot;https://my-app.example/callback&quot;, &quot;https://my-app.example/callback2&quot;],
   &quot;allowed_grant_types&quot;: [&quot;authorization_code&quot;, &quot;refresh_token&quot;],
   &quot;is_active&quot;: true
@@ -643,7 +668,7 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   &quot;username&quot;: &quot;tanaka&quot;,
   &quot;password&quot;: &quot;initial_password&quot;,
   &quot;email&quot;: &quot;tanaka@scolor-dev.work&quot;,
-  &quot;name&quot;: &quot;田中 太郎&quot;
+  &quot;must_change_password&quot;: true
 }
 </code></pre>
 <h4>GET /oauth/admin/members/{id}</h4>
@@ -840,6 +865,25 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
   }
 }</code></pre>
 
+<h3><span class="method method-get">GET</span> /oauth/me/sessions</h3>
+<p>自分の有効セッション一覧を取得する。<code>session_id</code> はハッシュ済みIDで、セッション無効化APIに渡す。</p>
+<p><strong>成功レスポンス:</strong></p>
+<pre><code class="language-json">{
+  "sessions": [
+    {
+      "session_id": "hashed-session-id",
+      "ip_address": "127.0.0.1",
+      "user_agent": "Mozilla/5.0 ...",
+      "created_at": 1719200000,
+      "last_accessed_at": 1719200300,
+      "is_current": true
+    }
+  ]
+}</code></pre>
+
+<h3><span class="method method-delete">DELETE</span> /oauth/me/sessions/{session_id}</h3>
+<p>自分の他セッションを無効化する。現在使用中のセッションは 400 で拒否される。</p>
+
 <h3><span class="method method-get">GET</span> /oauth/me/consents</h3>
 <p>自分が許可した連携アプリ一覧を取得する。</p>
 <p><strong>成功レスポンス:</strong></p>
@@ -873,12 +917,15 @@ WWW-Authenticate: Bearer error=&quot;invalid_token&quot;
       "id": "uuid",
       "client_id": "e35a945b",
       "name": "My App",
+      "description": "optional description",
+      "icon_url": "https://example.com/icon.png",
       "client_type": "public",
       "redirect_uris": ["http://localhost:3000/callback"],
       "allowed_grant_types": ["authorization_code"],
       "is_active": true,
       "created_by": "member-uuid",
-      "created_at": "..."
+      "created_at": "...",
+      "updated_at": "..."
     }
   ],
   "total": 1

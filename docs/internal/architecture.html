@@ -264,6 +264,8 @@
 <tr><td>id</td><td>UUID</td><td>主キー</td></tr>
 <tr><td>name</td><td>VARCHAR(100)</td><td>スコープ名（例: read, write, admin）</td></tr>
 <tr><td>description</td><td>TEXT</td><td>スコープの説明</td></tr>
+<tr><td>is_default</td><td>BOOLEAN</td><td>デフォルト付与対象か</td></tr>
+<tr><td>created_at</td><td>TIMESTAMP</td><td>作成日時</td></tr>
 </tbody>
 </table>
 
@@ -310,6 +312,8 @@
 <tr><td><code>GET</code></td><td>/oauth/me/identity</td><td>Identity 単体取得</td></tr>
 <tr><td><code>PUT</code></td><td>/oauth/me/identity</td><td>プロフィール更新（tagline含む）</td></tr>
 <tr><td><code>PUT</code></td><td>/oauth/me/password</td><td>パスワード変更</td></tr>
+<tr><td><code>GET</code></td><td>/oauth/me/sessions</td><td>自分の有効セッション一覧</td></tr>
+<tr><td><code>DELETE</code></td><td>/oauth/me/sessions/{session_id}</td><td>自分の他セッション無効化</td></tr>
 <tr><td><code>GET</code></td><td>/oauth/me/consents</td><td>連携アプリ一覧</td></tr>
 <tr><td><code>DELETE</code></td><td>/oauth/me/consents/{client_id}</td><td>連携取り消し</td></tr>
 <tr><td><code>GET</code></td><td>/oauth/me/clients</td><td>自分のクライアント一覧</td></tr>
@@ -326,6 +330,7 @@
 <tbody>
 <tr><td><code>CRUD</code></td><td>/oauth/admin/members</td><td>メンバー管理</td></tr>
 <tr><td><code>CRUD</code></td><td>/oauth/admin/clients</td><td>クライアント管理</td></tr>
+<tr><td><code>POST</code></td><td>/oauth/admin/clients/{id}/rotate-secret</td><td>クライアントシークレット再発行</td></tr>
 <tr><td><code>CRUD</code></td><td>/oauth/admin/scopes</td><td>スコープ管理</td></tr>
 <tr><td><code>GET</code></td><td>/oauth/admin/audit-logs</td><td>監査ログ閲覧</td></tr>
 </tbody>
