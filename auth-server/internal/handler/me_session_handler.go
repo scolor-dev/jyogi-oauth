@@ -1,12 +1,19 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 
 	"github.com/jyogi-oauth/auth-server/internal/middleware"
 	"github.com/jyogi-oauth/auth-server/internal/model"
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
+
+func hashSID(sessionID string) string {
+	h := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(h[:8])
+}
 
 type MeSessionHandler struct {
 	sessionStore *store.SessionStore
@@ -24,7 +31,7 @@ func (h *MeSessionHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentSessionID := middleware.GetSessionID(r.Context())
+	currentHashedID := hashSID(middleware.GetSessionID(r.Context()))
 
 	sessions, err := h.sessionStore.ListByMember(r.Context(), memberID.String())
 	if err != nil {
@@ -33,7 +40,7 @@ func (h *MeSessionHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, s := range sessions {
-		s["is_current"] = s["session_id"] == currentSessionID
+		s["is_current"] = s["session_id"] == currentHashedID
 	}
 
 	if sessions == nil {
@@ -56,13 +63,13 @@ func (h *MeSessionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentSessionID := middleware.GetSessionID(r.Context())
-	if sessionID == currentSessionID {
+	currentHashedID := hashSID(middleware.GetSessionID(r.Context()))
+	if sessionID == currentHashedID {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Cannot revoke current session")
 		return
 	}
 
-	if err := h.sessionStore.DeleteByID(r.Context(), sessionID, memberID.String()); err != nil {
+	if err := h.sessionStore.DeleteByHashedID(r.Context(), sessionID, memberID.String()); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Session not found")
 		return
 	}

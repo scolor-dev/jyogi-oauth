@@ -2,15 +2,21 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"crypto/rand"
-	"encoding/base64"
-
 	"github.com/redis/go-redis/v9"
 )
+
+func hashSessionID(sessionID string) string {
+	h := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(h[:8])
+}
 
 type OAuthFlowParams struct {
 	ClientID            string `json:"client_id"`
@@ -130,7 +136,7 @@ func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map
 			continue
 		}
 		sessions = append(sessions, map[string]any{
-			"session_id":       sid,
+			"session_id":       hashSessionID(sid),
 			"ip_address":       data.IPAddress,
 			"user_agent":       data.UserAgent,
 			"created_at":       data.CreatedAt,
@@ -140,17 +146,21 @@ func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map
 	return sessions, nil
 }
 
-func (s *SessionStore) DeleteByID(ctx context.Context, sessionID, memberID string) error {
-	data, err := s.Get(ctx, sessionID)
-	if err != nil || data == nil {
-		return fmt.Errorf("session not found")
+func (s *SessionStore) DeleteByHashedID(ctx context.Context, hashedID, memberID string) error {
+	memberSetKey := "auth:member_sessions:" + memberID
+	sessionIDs, err := s.client.SMembers(ctx, memberSetKey).Result()
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
 	}
-	if data.MemberID != memberID {
-		return fmt.Errorf("session does not belong to this member")
+
+	for _, sid := range sessionIDs {
+		if hashSessionID(sid) == hashedID {
+			if err := s.client.Del(ctx, "auth:session:"+sid).Err(); err != nil {
+				return fmt.Errorf("delete session: %w", err)
+			}
+			s.client.SRem(ctx, memberSetKey, sid)
+			return nil
+		}
 	}
-	if err := s.client.Del(ctx, "auth:session:"+sessionID).Err(); err != nil {
-		return fmt.Errorf("delete session: %w", err)
-	}
-	s.client.SRem(ctx, "auth:member_sessions:"+memberID, sessionID)
-	return nil
+	return fmt.Errorf("session not found")
 }
