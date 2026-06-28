@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -11,6 +11,7 @@ const tab = ref<'profile' | 'apps' | 'clients' | 'sessions'>('profile')
 const consents = ref<any[]>([])
 const myClients = ref<any[]>([])
 const sessions = ref<any[]>([])
+const sessionsLoaded = ref(false)
 const saving = ref(false)
 const saveMsg = ref('')
 
@@ -46,7 +47,12 @@ onMounted(async () => {
   }
   loadConsents()
   loadClients()
-  loadSessions()
+})
+
+watch(tab, (val) => {
+  if (val === 'sessions' && !sessionsLoaded.value) {
+    loadSessions()
+  }
 })
 
 async function loadConsents() {
@@ -87,6 +93,7 @@ async function loadSessions() {
   try {
     const data = await api.getSessions()
     sessions.value = data.sessions || []
+    sessionsLoaded.value = true
   } catch {}
 }
 
