@@ -7,9 +7,10 @@ import { useAuthStore } from '../stores/auth'
 const router = useRouter()
 const auth = useAuthStore()
 
-const tab = ref<'profile' | 'apps' | 'clients'>('profile')
+const tab = ref<'profile' | 'apps' | 'clients' | 'sessions'>('profile')
 const consents = ref<any[]>([])
 const myClients = ref<any[]>([])
+const sessions = ref<any[]>([])
 const saving = ref(false)
 const saveMsg = ref('')
 
@@ -45,6 +46,7 @@ onMounted(async () => {
   }
   loadConsents()
   loadClients()
+  loadSessions()
 })
 
 async function loadConsents() {
@@ -79,6 +81,30 @@ async function saveProfile() {
   } finally {
     saving.value = false
   }
+}
+
+async function loadSessions() {
+  try {
+    const data = await api.getSessions()
+    sessions.value = data.sessions || []
+  } catch {}
+}
+
+function parseUA(ua: string): string {
+  if (!ua) return 'Unknown'
+  if (ua.includes('Firefox')) return 'Firefox'
+  if (ua.includes('Edg/')) return 'Edge'
+  if (ua.includes('Chrome')) return 'Chrome'
+  if (ua.includes('Safari')) return 'Safari'
+  return ua.substring(0, 30)
+}
+
+async function revokeSession(sessionId: string) {
+  if (!confirm('このセッションを無効化しますか？')) return
+  try {
+    await api.revokeSession(sessionId)
+    await loadSessions()
+  } catch {}
 }
 
 async function revokeApp(clientId: string) {
@@ -180,6 +206,7 @@ const previewStyle = computed(() => ({
       <button :class="['tab', { active: tab === 'profile' }]" @click="tab = 'profile'">Profile</button>
       <button :class="['tab', { active: tab === 'apps' }]" @click="tab = 'apps'">Connected Apps</button>
       <button :class="['tab', { active: tab === 'clients' }]" @click="tab = 'clients'">My Clients</button>
+      <button :class="['tab', { active: tab === 'sessions' }]" @click="tab = 'sessions'">Sessions</button>
     </div>
 
     <!-- Profile Tab -->
@@ -354,6 +381,27 @@ const previewStyle = computed(() => ({
         </div>
       </div>
     </div>
+
+    <!-- Sessions Tab -->
+    <div v-if="tab === 'sessions'" class="card">
+      <h2>Active Sessions</h2>
+      <p v-if="!sessions.length" class="empty">No active sessions</p>
+      <div v-for="s in sessions" :key="s.session_id" class="session-item">
+        <div class="session-info">
+          <div class="session-browser">
+            {{ parseUA(s.user_agent) }}
+            <span v-if="s.is_current" class="current-badge">Current</span>
+          </div>
+          <div class="session-meta">
+            <span>IP: {{ s.ip_address || 'Unknown' }}</span>
+            <span>Login: {{ new Date(s.created_at * 1000).toLocaleString('ja-JP') }}</span>
+            <span>Last: {{ new Date(s.last_accessed_at * 1000).toLocaleString('ja-JP') }}</span>
+          </div>
+        </div>
+        <button v-if="!s.is_current" class="btn-danger btn-sm" @click="revokeSession(s.session_id)">Revoke</button>
+        <span v-else class="current-label">使用中</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -479,4 +527,17 @@ select {
 }
 .edit-form .form-group { margin-bottom: 0.8rem; }
 .edit-actions { display: flex; gap: 0.5rem; }
+
+.session-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.8rem 0; border-bottom: 1px solid #f0f0f0;
+}
+.session-item:last-child { border-bottom: none; }
+.session-browser { font-weight: 600; margin-bottom: 0.2rem; }
+.session-meta { display: flex; gap: 1rem; font-size: 0.8rem; color: #888; flex-wrap: wrap; }
+.current-badge {
+  display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+  background: #e8f5e9; color: #2e7d32; font-weight: 600; margin-left: 0.4rem;
+}
+.current-label { font-size: 0.8rem; color: #888; flex-shrink: 0; }
 </style>

@@ -93,6 +93,7 @@ func main() {
 	meConsentHandler := handler.NewMeConsentHandler(consentStore, auditStore, pool)
 	mePasswordHandler := handler.NewMePasswordHandler(memberStore, sessionStore, auditStore, pwConfig)
 	meClientHandler := handler.NewMeClientHandler(clientStore, auditStore)
+	meSessionHandler := handler.NewMeSessionHandler(sessionStore, auditStore)
 
 	mux := http.NewServeMux()
 
@@ -140,6 +141,9 @@ func main() {
 	mux.HandleFunc("GET /oauth/me/consents", meConsentHandler.List)
 	mux.HandleFunc("DELETE /oauth/me/consents/{client_id}", meConsentHandler.Revoke)
 	mux.HandleFunc("POST /oauth/logout", meHandler.Logout)
+
+	mux.HandleFunc("GET /oauth/me/sessions", meSessionHandler.List)
+	mux.HandleFunc("DELETE /oauth/me/sessions/{session_id}", meSessionHandler.Revoke)
 
 	mux.HandleFunc("GET /oauth/me/clients", meClientHandler.List)
 	mux.HandleFunc("POST /oauth/me/clients", meClientHandler.Create)

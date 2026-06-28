@@ -61,6 +61,13 @@ func (s *SessionStore) Create(ctx context.Context, data *SessionData) (string, e
 	if err := s.client.Set(ctx, "auth:session:"+sessionID, b, s.ttl).Err(); err != nil {
 		return "", fmt.Errorf("save session: %w", err)
 	}
+
+	if data.MemberID != "" {
+		memberSetKey := "auth:member_sessions:" + data.MemberID
+		s.client.SAdd(ctx, memberSetKey, sessionID)
+		s.client.Expire(ctx, memberSetKey, s.ttl)
+	}
+
 	return sessionID, nil
 }
 
@@ -93,8 +100,48 @@ func (s *SessionStore) Update(ctx context.Context, sessionID string, data *Sessi
 }
 
 func (s *SessionStore) Delete(ctx context.Context, sessionID string) error {
+	data, _ := s.Get(ctx, sessionID)
 	if err := s.client.Del(ctx, "auth:session:"+sessionID).Err(); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
+	if data != nil && data.MemberID != "" {
+		s.client.SRem(ctx, "auth:member_sessions:"+data.MemberID, sessionID)
+	}
 	return nil
+}
+
+func (s *SessionStore) ListByMember(ctx context.Context, memberID string) ([]map[string]any, error) {
+	memberSetKey := "auth:member_sessions:" + memberID
+	sessionIDs, err := s.client.SMembers(ctx, memberSetKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list member sessions: %w", err)
+	}
+
+	var sessions []map[string]any
+	for _, sid := range sessionIDs {
+		data, err := s.Get(ctx, sid)
+		if err != nil || data == nil {
+			s.client.SRem(ctx, memberSetKey, sid)
+			continue
+		}
+		sessions = append(sessions, map[string]any{
+			"session_id":       sid,
+			"ip_address":       data.IPAddress,
+			"user_agent":       data.UserAgent,
+			"created_at":       data.CreatedAt,
+			"last_accessed_at": data.LastAccessedAt,
+		})
+	}
+	return sessions, nil
+}
+
+func (s *SessionStore) DeleteByID(ctx context.Context, sessionID, memberID string) error {
+	data, err := s.Get(ctx, sessionID)
+	if err != nil || data == nil {
+		return fmt.Errorf("session not found")
+	}
+	if data.MemberID != memberID {
+		return fmt.Errorf("session does not belong to this member")
+	}
+	return s.Delete(ctx, sessionID)
 }

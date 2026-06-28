@@ -45,6 +45,12 @@ export const api = {
   submitConsent: (approved: boolean, scopes: string[]) =>
     request<{ redirect_to: string }>('POST', '/oauth/consent', { approved, scopes }),
 
+  getSessions: () =>
+    request<{ sessions: any[] }>('GET', '/oauth/me/sessions'),
+
+  revokeSession: (sessionId: string) =>
+    request<void>('DELETE', `/oauth/me/sessions/${sessionId}`),
+
   getMyClients: () =>
     request<{ clients: any[]; total: number }>('GET', '/oauth/me/clients'),
 
