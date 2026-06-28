@@ -11,35 +11,35 @@ import (
 	"github.com/jyogi-oauth/auth-server/internal/store"
 )
 
-func (h *AdminMemberHandler) checkPrivilege(w http.ResponseWriter, r *http.Request, targetID uuid.UUID) (*model.Member, bool) {
-	operator := middleware.GetAdminMember(r.Context())
+func (h *AdminMemberHandler) checkPrivilege(w http.ResponseWriter, r *http.Request, targetID uuid.UUID) (target *model.Member, operator *model.Member, ok bool) {
+	operator = middleware.GetAdminMember(r.Context())
 	if operator == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Not logged in")
-		return nil, false
+		return nil, nil, false
 	}
 
 	if operator.ID == targetID {
 		writeError(w, http.StatusForbidden, "forbidden", "Cannot modify yourself via Admin API")
-		return nil, false
+		return nil, nil, false
 	}
 
 	target, err := h.memberStore.GetByID(r.Context(), targetID)
 	if err != nil || target == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Member not found")
-		return nil, false
+		return nil, nil, false
 	}
 
 	if target.IsRoot() {
 		writeError(w, http.StatusForbidden, "forbidden", "Cannot modify root user")
-		return nil, false
+		return nil, nil, false
 	}
 
 	if !model.CanManage(operator.Role, target.Role) {
 		writeError(w, http.StatusForbidden, "forbidden", "Insufficient permissions to manage this member")
-		return nil, false
+		return nil, nil, false
 	}
 
-	return target, true
+	return target, operator, true
 }
 
 type AdminMemberHandler struct {
@@ -170,11 +170,10 @@ func (h *AdminMemberHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := h.checkPrivilege(w, r, id); !ok {
+	_, operator, ok := h.checkPrivilege(w, r, id)
+	if !ok {
 		return
 	}
-
-	operator := middleware.GetAdminMember(r.Context())
 
 	var req updateMemberRequest
 	if err := readJSON(r, &req); err != nil {
@@ -236,7 +235,7 @@ func (h *AdminMemberHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := h.checkPrivilege(w, r, id); !ok {
+	if _, _, ok := h.checkPrivilege(w, r, id); !ok {
 		return
 	}
 
@@ -257,7 +256,7 @@ func (h *AdminMemberHandler) ResetPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	member, ok := h.checkPrivilege(w, r, id)
+	member, _, ok := h.checkPrivilege(w, r, id)
 	if !ok {
 		return
 	}
